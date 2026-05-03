@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { mutate } from "swr";
 import { CRM_NOTIFICATION_SCHEMA_VERSION } from "@/lib/crmNotificationPrefsSchema";
 
 const PREFS_KEY = "powercouple_crm_notification_prefs";
@@ -103,13 +102,12 @@ type PollOk = {
 
 type InAppToast = {
   id: string;
-  kind: "wa" | "lead" | "opp" | "order";
+  kind: "wa" | "lead" | "opp";
   title: string;
   body: string;
   threadId?: string;
   leadId?: string;
   opportunityId?: string;
-  orderId?: string;
 };
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -138,7 +136,6 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
   const waBaselineRef = useRef<Map<string, WaBaselineSnap>>(new Map());
   const leadBaselineRef = useRef<{ id: string; createdAt: string }>({ id: "", createdAt: "" });
   const oppBaselineRef = useRef<{ id: string; createdAt: string }>({ id: "", createdAt: "" });
-  const orderBaselineRef = useRef<{ id: string; createdAt: string }>({ id: "", createdAt: "" });
   const prefsRef = useRef(loadCrmNotificationPrefs());
 
   useEffect(() => {
@@ -181,11 +178,6 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
         oppBaselineRef.current = { id: j.latestOpportunity.id, createdAt: j.latestOpportunity.createdAt };
       } else {
         oppBaselineRef.current = { id: "__none__", createdAt: "" };
-      }
-      if (j.latestOrder) {
-        orderBaselineRef.current = { id: j.latestOrder.id, createdAt: j.latestOrder.createdAt };
-      } else {
-        orderBaselineRef.current = { id: "__none__", createdAt: "" };
       }
       initRef.current = true;
       return;
@@ -273,31 +265,6 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
         }
       }
       oppBaselineRef.current = { id: j.latestOpportunity.id, createdAt: j.latestOpportunity.createdAt };
-    }
-
-    if (j.latestOrder) {
-      const prev = orderBaselineRef.current;
-      if (j.latestOrder.id !== prev.id) {
-        if (prefs.inAppNewOrder) {
-          addToast({
-            kind: "order",
-            title: "הזמנה חדשה",
-            body: `${j.latestOrder.orderId}${j.latestOrder.name ? ` · ${j.latestOrder.name}` : ""}`,
-            orderId: j.latestOrder.id,
-          });
-        }
-        if (prefs.browserNewOrder && prefs.schemaVersion >= CRM_NOTIFICATION_SCHEMA_VERSION) {
-          pushBrowserNotification(
-            "הזמנה חדשה במערכת",
-            `${j.latestOrder.orderId}`,
-            `order-${j.latestOrder.id}`
-          );
-        }
-        /** אותו poll כבר רץ כל ~4ש׳ — מרענן את רשימות ההזמנות בלי להמתין ל־focus */
-        void mutate("crm-moving-orders");
-        void mutate("crm-moving-orders-by-opportunities");
-      }
-      orderBaselineRef.current = { id: j.latestOrder.id, createdAt: j.latestOrder.createdAt };
     }
   }, [addToast]);
 
@@ -424,7 +391,7 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
                 type="button"
                 onClick={() => {
                   dismissToast(t.id);
-                  router.push(`/contacts?openContactId=${encodeURIComponent(t.leadId!)}`);
+                  router.push(`/contacts/${encodeURIComponent(t.leadId!)}`);
                 }}
                 style={{
                   padding: "6px 12px",
@@ -459,27 +426,6 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
                 }}
               >
                 מעבר ללקוחות
-              </button>
-            ) : null}
-            {t.kind === "order" && t.orderId ? (
-              <button
-                type="button"
-                onClick={() => {
-                  dismissToast(t.id);
-                  router.push("/orders");
-                }}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: "linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%)",
-                  color: "#fff",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                מעבר להזמנות
               </button>
             ) : null}
           </div>

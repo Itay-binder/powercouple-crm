@@ -2,8 +2,6 @@ import UserMenu from "@/app/components/UserMenu";
 import CrmNavLink from "@/app/components/CrmNavLink";
 import CrmGlobalNotifications from "@/app/components/CrmGlobalNotifications";
 import CrmGlobalSearch from "@/app/components/CrmGlobalSearch";
-import { isMovingOrdersTenant } from "@/lib/tenant/movingOrders";
-
 export type CrmTenantOption = { id: string; label: string };
 
 type Props = {
@@ -76,9 +74,6 @@ export default function CrmShell({
           <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>תפעול</div>
           <CrmNavLink href="/tasks" label="משימות" />
           <CrmNavLink href="/calendar" label="לוח שנה" />
-          {isMovingOrdersTenant(currentTenantId) ? (
-            <CrmNavLink href="/orders" label="ניהול הזמנות" />
-          ) : null}
           {!isHotAfikTenant ? <CrmNavLink href="/billing" label="סליקה" /> : null}
           {!isHotAfikTenant ? (
             <CrmNavLink href="/whatsapp-automations" label="אוטומציות ווצאפ" />
