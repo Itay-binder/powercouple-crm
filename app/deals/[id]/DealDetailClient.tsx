@@ -239,7 +239,7 @@ export default function DealDetailClient({ id }: { id: string }) {
             {(draft.linkedContactIds ?? []).map((cid) => (
               <div key={cid} style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700 }}>{contacts[cid]?.name || cid}</span>
-                <Link href={`/contacts?openContactId=${encodeURIComponent(cid)}`} style={{ color: "#2563eb", fontWeight: 700 }}>
+                <Link href={`/contacts/${encodeURIComponent(cid)}`} style={{ color: "#2563eb", fontWeight: 700 }}>
                   כרטיס לקוח
                 </Link>
               </div>

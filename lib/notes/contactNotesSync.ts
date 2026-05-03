@@ -8,6 +8,8 @@ export type SyncedNote = {
   text: string;
   createdAt: string;
   createdBy?: string;
+  /** קטגוריית הערה (מסך לקוח, פייפליין וכו׳) */
+  category?: string;
   attachments?: NoteAttachmentMeta[];
 };
 
@@ -51,12 +53,14 @@ function collectNotes(into: Map<string, SyncedNote>, arr: unknown) {
     const createdAt = typeof o.createdAt === "string" ? o.createdAt : "";
     if (!id || !createdAt) continue;
     const createdBy = typeof o.createdBy === "string" ? o.createdBy : undefined;
+    const category = typeof o.category === "string" && o.category.trim() ? o.category.trim() : undefined;
     const attachments = parseAttachments(o.attachments);
     const next: SyncedNote = {
       id,
       text,
       createdAt,
       ...(createdBy ? { createdBy } : {}),
+      ...(category ? { category } : {}),
       ...(attachments ? { attachments } : {}),
     };
     const prev = into.get(id);
@@ -65,10 +69,12 @@ function collectNotes(into: Map<string, SyncedNote>, arr: unknown) {
       continue;
     }
     const mergedAtt = mergeAttachments(prev.attachments, next.attachments);
+    const mergedCategory = next.category ?? prev.category;
     into.set(id, {
       ...prev,
       ...next,
       text: next.text || prev.text,
+      ...(mergedCategory ? { category: mergedCategory } : {}),
       ...(mergedAtt ? { attachments: mergedAtt } : {}),
     });
   }

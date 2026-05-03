@@ -14,7 +14,7 @@ function taskHref(meta: EntityMeta): string {
   const base = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") || "";
   const path =
     meta.entityType === "contact"
-      ? `/contacts?openContactId=${encodeURIComponent(meta.entityId)}`
+      ? `/contacts/${encodeURIComponent(meta.entityId)}`
       : `/pipeline?openOpportunityId=${encodeURIComponent(meta.entityId)}`;
   return base ? `${base}${path}` : path;
 }

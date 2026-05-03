@@ -51,7 +51,7 @@ export default function CrmGlobalSearch() {
     setOpen(false);
     setQ("");
     if (hit.kind === "contact") {
-      router.push(`/contacts?openContactId=${encodeURIComponent(hit.id)}`);
+      router.push(`/contacts/${encodeURIComponent(hit.id)}`);
       return;
     }
     if (hit.kind === "opportunity") {

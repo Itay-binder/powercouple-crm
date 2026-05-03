@@ -53,7 +53,7 @@ function fromLocalInput(v: string): string {
 
 function entityHref(t: Task): string {
   return t.entityType === "contact"
-    ? `/contacts?openContactId=${encodeURIComponent(t.entityId)}`
+    ? `/contacts/${encodeURIComponent(t.entityId)}`
     : `/pipeline?openOpportunityId=${encodeURIComponent(t.entityId)}`;
 }
 

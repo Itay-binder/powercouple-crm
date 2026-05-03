@@ -39,6 +39,7 @@ export type LeadRecord = {
     text: string;
     createdAt: string;
     createdBy?: string;
+    category?: string;
     attachments?: Array<{ id: string; fileName: string; url: string }>;
   }>;
   tasks?: Array<{
@@ -269,7 +270,7 @@ export async function upsertLead(input: LeadUpsertInput): Promise<LeadRecord> {
           kind: "new_lead",
           title: "ליד חדש ב־CRM",
           body: `${name || "ללא שם"} · ${picked.phone ?? picked.email ?? ""}`.trim().slice(0, 180),
-          relativeUrl: `/contacts?openContactId=${encodeURIComponent(picked.docId)}`,
+          relativeUrl: `/contacts/${encodeURIComponent(picked.docId)}`,
           tag: `lead-${picked.docId}-${Date.now()}`,
         })
       )
@@ -382,6 +383,7 @@ export async function appendLeadNote(
   input: {
     text: string;
     createdBy?: string;
+    category?: string;
     id?: string;
     createdAt?: string;
   }
@@ -412,6 +414,7 @@ export async function appendLeadNote(
     text: rawText,
     createdAt: input.createdAt?.trim() || new Date().toISOString(),
     ...(input.createdBy?.trim() ? { createdBy: input.createdBy.trim() } : {}),
+    ...(input.category?.trim() ? { category: input.category.trim() } : {}),
   };
 
   await ref.set(
@@ -446,6 +449,7 @@ export async function updateLead(
       text: string;
       createdAt: string;
       createdBy?: string;
+      category?: string;
       attachments?: Array<{ id: string; fileName: string; url: string }>;
     }>;
     tasks?: Array<{
@@ -526,7 +530,14 @@ export async function updateLead(
   if (input.notes !== undefined && Array.isArray(input.notes)) {
     await propagateExactNotesToAllOpportunities(
       docId,
-      input.notes as Array<{ id: string; text: string; createdAt: string; createdBy?: string }>
+      input.notes as Array<{
+        id: string;
+        text: string;
+        createdAt: string;
+        createdBy?: string;
+        category?: string;
+        attachments?: Array<{ id: string; fileName: string; url: string }>;
+      }>
     );
   }
 

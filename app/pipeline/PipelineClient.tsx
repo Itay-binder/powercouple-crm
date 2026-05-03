@@ -2718,7 +2718,7 @@ export default function PipelineClient() {
                       onClick={() => {
                         const id = selectedOpp.contactId;
                         if (!id) return;
-                        window.location.href = `/contacts?openContactId=${encodeURIComponent(id)}`;
+                        window.location.href = `/contacts/${encodeURIComponent(id)}`;
                       }}
                       style={{ gridColumn: "1 / -1", padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 800 }}
                     >

@@ -152,9 +152,10 @@ function MatchedOpportunitiesCell({
     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
       {items.map((opp) => {
         const cid = opp.contactId?.trim() ?? "";
-        const href = opp.linkToContact
-          ? `/contacts?openContactId=${encodeURIComponent(opp.id)}`
-          : `/pipeline?openOpportunityId=${encodeURIComponent(opp.id)}`;
+        const href =
+          opp.linkToContact && cid
+            ? `/contacts/${encodeURIComponent(cid)}`
+            : `/pipeline?openOpportunityId=${encodeURIComponent(opp.id)}`;
         return (
           <span
             key={cid || (opp.linkToContact ? `c-${opp.id}` : opp.id)}
