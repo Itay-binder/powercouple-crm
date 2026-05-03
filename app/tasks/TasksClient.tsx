@@ -369,7 +369,7 @@ export default function TasksClient() {
         >
           <div style={{ fontWeight: 900, fontSize: 13 }}>{t.title}</div>
           <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-            {t.entityType === "contact" ? "איש קשר" : "הזדמנות"}:{" "}
+            {t.entityType === "contact" ? "איש קשר" : "לקוח"}:{" "}
             <span
               role="link"
               tabIndex={0}
@@ -771,7 +771,7 @@ export default function TasksClient() {
                   textDecoration: "none",
                 }}
               >
-                {active.entityType === "contact" ? "פתח איש קשר" : "פתח הזדמנות"}
+                {active.entityType === "contact" ? "פתח איש קשר" : "פתח לקוח"}
               </a>
               <span style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>
                 {active.pipelineName}

@@ -302,7 +302,7 @@ function MoverMatchTable({
             <th style={thStyle}>ליד אחרון שקיבל (תאריך)</th>
             <th style={thStyle}>שעות / גמישות</th>
             <th style={{ ...thStyle, minWidth: 130, whiteSpace: "nowrap" }}>וואטסאפ</th>
-            {showOpportunityLinks ? <th style={thStyle}>הזדמנות</th> : null}
+            {showOpportunityLinks ? <th style={thStyle}>לקוחות</th> : null}
           </tr>
         </thead>
         <tbody>

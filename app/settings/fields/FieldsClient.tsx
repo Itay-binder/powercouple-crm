@@ -49,7 +49,7 @@ const CONTACT_SYSTEM_FIELDS: SystemField[] = [
 ];
 
 const OPPORTUNITY_SYSTEM_FIELDS: SystemField[] = [
-  { kind: "system", entityType: "opportunity", label: "שם הזדמנות", fieldId: "opportunity_name", type: "text", isRequired: true, isActive: true },
+  { kind: "system", entityType: "opportunity", label: "שם לקוח (פייפליין)", fieldId: "opportunity_name", type: "text", isRequired: true, isActive: true },
   { kind: "system", entityType: "opportunity", label: "פייפליין", fieldId: "opportunity_pipeline_id", type: "select", isRequired: true, isActive: true },
   { kind: "system", entityType: "opportunity", label: "שלב בפייפליין", fieldId: "opportunity_stage", type: "select", isRequired: true, isActive: true },
   { kind: "system", entityType: "opportunity", label: "סטטוס", fieldId: "opportunity_status", type: "select", isRequired: false, isActive: true, options: ["פתוח", "זכיה", "הפסד"] },
@@ -182,7 +182,7 @@ function LabelsCatalogBlock() {
   }
 
   async function removeLabel(id: string) {
-    if (!window.confirm("למחוק תגית זו מכל ההזדמנויות והאנשי קשר?")) return;
+    if (!window.confirm("למחוק תגית זו מכל הלקוחות והאנשי קשר?")) return;
     const res = await fetch(`/api/labels/${encodeURIComponent(id)}`, {
       method: "DELETE",
       credentials: "include",
@@ -207,7 +207,7 @@ function LabelsCatalogBlock() {
     >
       <h2 style={{ margin: "0 0 8px", fontSize: 17 }}>קטלוג תגיות (Labels)</h2>
       <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>
-        סוג שדה <strong>label</strong> ב-API: מערך <code>labelIds</code> על הזדמנות או איש קשר. ניהול המזהים:
+        סוג שדה <strong>label</strong> ב-API: מערך <code>labelIds</code> על לקוח (פייפליין) או איש קשר. ניהול המזהים:
         <code style={{ marginInlineStart: 6 }}>GET/POST /api/labels</code>,{" "}
         <code>PATCH/DELETE /api/labels/[id]</code>. שמות ישנים ב-<code>tags</code> עדיין מתקבלים בזמן מעבר
         ומתורגמים לפי שם תגית.
@@ -563,12 +563,12 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     ? [
         { id: "all", label: "כל השדות" },
         { id: "contact", label: "תיקיית אנשי קשר" },
-        { id: "opportunity", label: "תיקיית הזדמנויות" },
+        { id: "opportunity", label: "תיקיית לקוחות" },
       ]
     : [
         { id: "all", label: "כל השדות" },
         { id: "contact", label: "תיקיית אנשי קשר" },
-        { id: "opportunity", label: "תיקיית הזדמנויות" },
+        { id: "opportunity", label: "תיקיית לקוחות" },
         { id: "moving_order", label: "תיקיית הזמנות הובלה" },
       ];
 
@@ -695,7 +695,7 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
         >
           <div style={{ fontWeight: 800, marginBottom: 6 }}>היקף פייפליין (אופציונלי)</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-            רלוונטי בעיקר לשדות על הזדמנות ולידים לפי פייפליין. ברירת מחדל: השדה חל על כל הפייפליינים.
+            רלוונטי בעיקר לשדות על לקוחות ולידים לפי פייפליין. ברירת מחדל: השדה חל על כל הפייפליינים.
           </div>
           {pipelines.length === 0 ? (
             <div style={{ fontSize: 13, color: "#6b7280" }}>אין פייפליינים מוגדרים — השדה יחול על כולם.</div>

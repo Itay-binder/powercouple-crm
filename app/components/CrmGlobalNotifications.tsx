@@ -259,14 +259,14 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
         if (prefs.inAppNewOpportunity) {
           addToast({
             kind: "opp",
-            title: "הזדמנות חדשה",
+            title: "לקוח חדש",
             body: `${j.latestOpportunity.name || "ללא שם"}${j.latestOpportunity.contactName ? ` · ${j.latestOpportunity.contactName}` : ""}`,
             opportunityId: j.latestOpportunity.id,
           });
         }
         if (prefs.browserNewOpportunity && prefs.schemaVersion >= CRM_NOTIFICATION_SCHEMA_VERSION) {
           pushBrowserNotification(
-            "הזדמנות חדשה ב־CRM",
+            "לקוח חדש ב־CRM",
             `${j.latestOpportunity.name || "ללא שם"}`,
             `opp-${j.latestOpportunity.id}`
           );
@@ -458,7 +458,7 @@ export default function CrmGlobalNotifications({ tenantId = null }: CrmGlobalNot
                   cursor: "pointer",
                 }}
               >
-                מעבר להזדמנות
+                מעבר ללקוחות
               </button>
             ) : null}
             {t.kind === "order" && t.orderId ? (

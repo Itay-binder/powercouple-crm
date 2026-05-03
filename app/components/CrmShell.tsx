@@ -67,9 +67,10 @@ export default function CrmShell({
         <nav className="crm-shell-nav" style={{ display: "grid", gap: 8, marginTop: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 4 }}>ראשי</div>
           <CrmNavLink href="/dashboard" label="דשבורד" />
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>אנשי קשר</div>
+          <CrmNavLink href="/contacts" label="אנשי קשר" />
           <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>ניהול לקוחות</div>
-          <CrmNavLink href="/contacts" label="טבלת לידים" />
-          <CrmNavLink href="/pipeline" label="פייפליינים" />
+          <CrmNavLink href="/pipeline" label="לקוחות" />
           <CrmNavLink href="/deals" label="עסקאות נדל״ן" />
           <CrmNavLink href="/inquiries" label="פניות" />
           <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>תפעול</div>

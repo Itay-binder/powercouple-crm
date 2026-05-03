@@ -42,7 +42,7 @@ export default function CrmGlobalSearch() {
 
   function kindLabel(kind: string) {
     if (kind === "contact") return "איש קשר";
-    if (kind === "opportunity") return "הזדמנות";
+    if (kind === "opportunity") return "לקוח";
     if (kind === "deal") return "עסקה";
     return kind;
   }
@@ -67,7 +67,7 @@ export default function CrmGlobalSearch() {
     <div ref={rootRef} style={{ position: "relative", width: "100%" }}>
       <input
         aria-label="חיפוש גלובלי"
-        placeholder="חיפוש — לקוחות, הזדמנויות, עסקאות…"
+        placeholder="חיפוש — אנשי קשר, לקוחות, עסקאות…"
         value={q}
         onChange={(e) => {
           setQ(e.target.value);

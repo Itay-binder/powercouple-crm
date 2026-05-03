@@ -396,8 +396,8 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
               (v) => persist({ ...prefs, inAppNewLead: v })
             )}
             {row(
-              "התראה צפה — הזדמנות חדשה",
-              "כרטיס כשנוצרת הזדמנות חדשה.",
+              "התראה צפה — לקוח חדש",
+              "כרטיס כשנוצר לקוח חדש בפייפליין.",
               prefs.inAppNewOpportunity,
               (v) => persist({ ...prefs, inAppNewOpportunity: v })
             )}
@@ -455,8 +455,8 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
               (v) => void patchDevicePrefs({ ...devicePrefs, newLead: v })
             )}
             {row(
-              "דחיפה — הזדמנות חדשה",
-              "נשלח כשנוצרת הזדמנות חדשה.",
+              "דחיפה — לקוח חדש",
+              "נשלח כשנוצר לקוח חדש בפייפליין.",
               devicePrefs.newOpportunity,
               (v) => void patchDevicePrefs({ ...devicePrefs, newOpportunity: v })
             )}
@@ -599,7 +599,7 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
               (v) => persistBrowserToggles({ ...prefs, browserNewLead: v })
             )}
             {row(
-              "התראת דפדפן — הזדמנות חדשה",
+              "התראת דפדפן — לקוח חדש",
               "מופעל רק אם ההרשאה מאושרת וגם אפשרות זו מסומנת.",
               prefs.browserNewOpportunity,
               (v) => persistBrowserToggles({ ...prefs, browserNewOpportunity: v })

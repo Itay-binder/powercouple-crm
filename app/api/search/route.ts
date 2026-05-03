@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
         hits.push({
           kind: "opportunity",
           id: o.id,
-          title: (o.name ?? "").trim() || "הזדמנות",
+          title: (o.name ?? "").trim() || "לקוח",
           subtitle: [o.stage, o.contactPhone].filter(Boolean).join(" · ") || o.id,
         });
         if (hits.length >= 25) break;

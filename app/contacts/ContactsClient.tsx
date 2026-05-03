@@ -1575,10 +1575,10 @@ export default function ContactsClient({
                   ))}
                 </select>
                 <div style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 8 }}>
-                  <div style={{ fontWeight: 800, marginBottom: 6 }}>הזדמנויות פתוחות תחת איש קשר</div>
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>לקוחות (פייפליין) תחת איש קשר</div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {detailOpportunities.length === 0 ? (
-                      <span style={{ color: "#6b7280", fontSize: 12 }}>אין הזדמנויות פתוחות כרגע</span>
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>אין לקוחות פתוחים כרגע</span>
                     ) : (
                       detailOpportunities.map((o) => (
                         <button
@@ -1597,7 +1597,7 @@ export default function ContactsClient({
                             cursor: "pointer",
                             textAlign: "right",
                           }}
-                          title="פתח הזדמנות"
+                          title="פתח לקוח (פייפליין)"
                         >
                           {o.name} · {o.pipelineName || o.pipelineId} · {o.stage} · {o.status ?? "פתוח"}
                         </button>
@@ -1844,7 +1844,7 @@ export default function ContactsClient({
                     {t.reminderAt ? (
                       <span style={{ color: "#7c3aed", fontSize: 11 }}>תזכורת: {formatIsraelDateTime(t.reminderAt)}</span>
                     ) : null}
-                    <span style={{ fontSize: 11, color: "#94a3b8" }}>מהזדמנות (קריאה בלבד)</span>
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>מלקוח (קריאה בלבד)</span>
                   </div>
                 ))}
                 <button

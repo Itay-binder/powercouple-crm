@@ -119,7 +119,7 @@ function MatchedOpportunitiesCell({
     if (!cid) return;
     if (
       !window.confirm(
-        `להסיר את «${opp.name}» מרשימת ההזדמנות שנשלחו?\n\nההזמנה תוסר גם מלשונית «הזמנות לפי מובילים», ובשדה «מספר פניות (לידים)» של ההזדמנות יופחת 1.`
+        `להסיר את «${opp.name}» מרשימת הלקוחות שנשלחו?\n\nההזמנה תוסר גם מלשונית «הזמנות לפי מובילים», ובשדה «מספר פניות (לידים)» של רשומת הלקוח יופחת 1.`
       )
     ) {
       return;
@@ -182,7 +182,7 @@ function MatchedOpportunitiesCell({
                 padding: "2px 4px",
                 minWidth: 0,
               }}
-              title={opp.linkToContact ? "פתח איש קשר" : "פתח בניהול הזדמנויות"}
+              title={opp.linkToContact ? "פתח איש קשר" : "פתח בניהול לקוחות"}
               onClick={(e) => e.stopPropagation()}
             >
               {opp.name}
@@ -282,7 +282,7 @@ function MatchedOpportunitiesCell({
             borderColor: "#ddd6fe",
           }}
         >
-          {open ? "▴" : "▾"} {items.length} הזדמנויות
+          {open ? "▴" : "▾"} {items.length} לקוחות
         </span>
         <span style={{ color: "#7c3aed", fontSize: 11, fontWeight: 700 }}>הצג שמות</span>
       </button>
@@ -498,7 +498,7 @@ export default function OrdersBoardTab() {
       pipelineId: "פייפליין",
       stage: "שלב",
       status: "סטטוס",
-      [ORDER_MATCHED_OPPS_COL]: "הזדמנויות (נשלחו)",
+      [ORDER_MATCHED_OPPS_COL]: "לקוחות (נשלחו)",
       createdAt: "נוצר",
       updatedAt: "עודכן",
     };
@@ -834,7 +834,7 @@ export default function OrdersBoardTab() {
         <span style={{ color: "#6b7280", wordBreak: "break-word" }}>
           {opps.length <= 2
             ? opps.map((x) => x.name).join(", ")
-            : `${opps.length} הזדמנויות`}
+            : `${opps.length} לקוחות`}
         </span>
       );
     }

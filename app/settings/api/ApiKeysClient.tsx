@@ -430,11 +430,11 @@ ${hKey}
 ${hTenant.replace(" \\", "")}`}
       />
       <p style={{ margin: "8px 0 0", color: "#4b5563", fontSize: 13 }}>
-        פירוט איש קשר + הזדמנויות מקושרות: <strong>GET</strong>{" "}
+        פירוט איש קשר + לקוחות (פייפליין) מקושרים: <strong>GET</strong>{" "}
         <code dir="ltr">{`${base}/api/contacts/CONTACT_ID`}</code>
       </p>
 
-      {sectionTitle("3", "יצירת / עדכון הזדמנות (REST)")}
+      {sectionTitle("3", "יצירת / עדכון לקוח (REST, opportunities)")}
       <p style={{ margin: 0, color: "#4b5563", fontSize: 14, lineHeight: 1.55 }}>
         <strong>POST</strong> — חובה <code dir="ltr">contactId</code> (מזהה איש קשר). מומלץ גם{" "}
         <code dir="ltr">pipelineId</code>, <code dir="ltr">stage</code>, <code dir="ltr">name</code>.
@@ -447,7 +447,7 @@ ${hTenant}
   -d '{"contactId":"CONTACT_ID","pipelineId":"PIPELINE_ID","stage":"Pending","name":"ליד חדש","phone":"0501234567"}'`}
       />
       <p style={{ margin: "12px 0 0", color: "#4b5563", fontSize: 14, lineHeight: 1.55 }}>
-        <strong>PATCH</strong> לפי מזהה הזדמנות:
+        <strong>PATCH</strong> לפי מזהה לקוח (opportunity):
       </p>
       <CodeBlock
         text={`curl -X PATCH "${base}/api/opportunities/OPPORTUNITY_ID" \\
@@ -457,7 +457,7 @@ ${hTenant}
   -d '{"stage":"Contacted","value":1500,"status":"פתוח"}'`}
       />
 
-      {sectionTitle("4", "שליפת הזדמנויות")}
+      {sectionTitle("4", "שליפת לקוחות (opportunities)")}
       <p style={{ margin: 0, color: "#4b5563", fontSize: 14, lineHeight: 1.55 }}>
         <strong>GET</strong> — אופציונלי <code dir="ltr">pipelineId</code>, <code dir="ltr">phone</code>.
       </p>
@@ -467,7 +467,7 @@ ${hKey}
 ${tenantHeaderLine}`}
       />
       <p style={{ margin: "8px 0 0", color: "#4b5563", fontSize: 13 }}>
-        הזדמנות בודדת: <strong>GET</strong> <code dir="ltr">{`${base}/api/opportunities/OPPORTUNITY_ID`}</code>
+        לקוח בודד: <strong>GET</strong> <code dir="ltr">{`${base}/api/opportunities/OPPORTUNITY_ID`}</code>
       </p>
 
       {sectionTitle("5", "קליטה עם מזהה חיצוני (מומלץ ל-Make)")}
@@ -483,7 +483,7 @@ ${hKey}
 ${hTenant}
   -d '{"provider":"make","externalId":"row-123","contact":{"phone":"0501234567","name":"ישראל","email":"a@b.com"}}'`}
       />
-      <p style={{ margin: "10px 0 0", fontWeight: 700, fontSize: 13 }}>הזדמנות (דורש contactId)</p>
+      <p style={{ margin: "10px 0 0", fontWeight: 700, fontSize: 13 }}>לקוח — יצירה (דורש contactId)</p>
       <CodeBlock
         text={`curl -X POST "${base}/api/ingest/opportunity-upsert" \\
 ${hJson}
@@ -511,8 +511,8 @@ ${hTenant}
       </p>
       <p style={{ margin: "4px 0 0", color: "#4b5563", fontSize: 13, lineHeight: 1.5 }}>
         <strong>POST</strong> <code dir="ltr">/api/ingest/mover-welcome</code> — מערך כמו בוובהוק Make; מזהה
-        הזדמנות לפי <code dir="ltr">phone</code> (או <code dir="ltr">opportunity_id</code>); ממלא שדות
-        מותאמים על ההזדמנות ומסנכרן שדות מוביל על איש הקשר.
+        לקוח לפי <code dir="ltr">phone</code> (או <code dir="ltr">opportunity_id</code>); ממלא שדות
+        מותאמים על רשומת הלקוח ומסנכרן שדות מוביל על איש הקשר.
       </p>
       <CodeBlock
         text={`curl -X POST "${base}/api/ingest/mover-welcome" \\

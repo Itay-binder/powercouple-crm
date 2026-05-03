@@ -110,7 +110,7 @@ export default function TriggersClient() {
         הגדר לאן נשלחים אירועי המערכת (Make, n8n, וכו׳). גוף הבקשה הוא JSON עם שדות{" "}
         <code style={{ background: "#f3f4f6", padding: "2px 6px", borderRadius: 6 }}>event</code>,{" "}
         <code style={{ background: "#f3f4f6", padding: "2px 6px", borderRadius: 6 }}>sentAt</code> ונתוני
-        הקשר (משימה / ליד / הזדמנות). תזכורות משימות מסתנכרנות עם ה-cron (GitHub Actions כל 5 דק׳).
+        הקשר (משימה / ליד / לקוח בפייפליין). תזכורות משימות מסתנכרנות עם ה-cron (GitHub Actions כל 5 דק׳).
       </p>
 
       {loading ? (

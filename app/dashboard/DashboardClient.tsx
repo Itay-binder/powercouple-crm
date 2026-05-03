@@ -83,7 +83,7 @@ function isDashboardWidgetHiddenForTenant(tenantId: string | null | undefined, i
 }
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
-  { id: "opp_count", title: "כמות לידים (הזדמנויות)", visible: true },
+  { id: "opp_count", title: "כמות לקוחות (בטווח)", visible: true },
   { id: "orders_count", title: "כמות הזמנות", visible: true },
   { id: "leads_by_channel", title: "לידים לפי ערוצים", visible: true },
   { id: "paying_count", title: "לקוחות במערכת (פייפליין לקוחות משלמים)", visible: true },
@@ -320,9 +320,9 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
       return (
         <div key={id}>
           {kpiCard(
-            "כמות לידים",
+            "כמות לקוחות",
             m ? prettyCount(m.opportunityCount) : "—",
-            "הזדמנויות שנוצרו בטווח התאריכים (כל הפייפליינים)"
+            "לקוחות שנוצרו בטווח התאריכים (כל הפייפליינים)"
           )}
         </div>
       );
@@ -341,7 +341,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
     if (id === "leads_by_channel") {
       return (
         <div key={id}>
-          {tableShell("לידים לפי ערוצים", "לפי utm_source של ההזדמנות בטווח התאריכים", renderUtmTable(m ? sortedEntries(m.leadsByUtmSource) : []))}
+          {tableShell("לקוחות לפי ערוץ", "לפי utm_source של רשומת הלקוח בטווח התאריכים", renderUtmTable(m ? sortedEntries(m.leadsByUtmSource) : []))}
         </div>
       );
     }
@@ -352,7 +352,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
             "לקוחות במערכת",
             m ? prettyCount(m.payingCustomersInRangeCount) : "—",
             m
-              ? `פייפליין: ${m.payingCustomersPipelineName} · לפי תאריך יצירת ההזדמנות בטווח`
+              ? `פייפליין: ${m.payingCustomersPipelineName} · לפי תאריך יצירת הלקוח בטווח`
               : undefined
           )}
         </div>
@@ -375,7 +375,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
           {kpiCard(
             "לקוחות פעילים",
             m ? prettyCount(m.payingCustomersOpenCount) : "—",
-            "הזדמנויות בפייפליין לקוחות משלמים עם סטטוס פתוח (ללא סינון תאריכים)"
+            "רשומות בפייפליין «לקוחות משלמים» עם סטטוס פתוח (ללא סינון תאריכים)"
           )}
         </div>
       );
@@ -383,7 +383,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
     if (id === "orders_per_mover") {
       const rows = m?.ordersPerMover ?? [];
       const subtitle =
-        "המספר לפי שדה opportunity_leads_count בפייפליין (כמו עמודת הקאונטר בניהול הזדמנויות). ממוין: פעילים (סטטוס פתוח) לפי כמות יורד, אחריהם לא פעילים. רקע אדום עדין = לא פעיל.";
+        "המספר לפי שדה opportunity_leads_count בפייפליין (כמו עמודת הקאונטר בניהול לקוחות). ממוין: פעילים (סטטוס פתוח) לפי כמות יורד, אחריהם לא פעילים. רקע אדום עדין = לא פעיל.";
       const body =
         rows.length === 0 ? (
           <div style={{ padding: 14, color: "#6b7280", fontWeight: 600 }}>אין מובילים או אין הזמנות משויכות.</div>
@@ -392,7 +392,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
             <thead>
               <tr>
                 <th style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
-                  מוביל / הזדמנות
+                  מוביל / לקוח
                 </th>
                 <th style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
                   לידים (קאונטר)
@@ -531,7 +531,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
                       <td style={{ padding: "10px 12px" }}>{t.status}</td>
                       <td style={{ padding: "10px 12px" }}>
                         <a href={taskEntityHref(t)} style={{ color: "#4c1d95", fontWeight: 700 }}>
-                          {t.entityType === "contact" ? "איש קשר" : "הזדמנות"} · {t.entityName}
+                          {t.entityType === "contact" ? "איש קשר" : "לקוח"} · {t.entityName}
                         </a>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
@@ -709,7 +709,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
             ניהול לקוחות · {metrics.salesPipelineName}
           </div>
           <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, lineHeight: 1.45 }}>
-            ספירת לקוחות (הזדמנויות) לפי שלב בפייפליין. לחיצה פותחת את לוח הניהול מסונן לשלב.
+            ספירת לקוחות לפי שלב בפייפליין. לחיצה פותחת את לוח הניהול מסונן לשלב.
           </div>
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
             {Object.entries(metrics.salesStageCounts).map(([stage, count]) => (
@@ -789,7 +789,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
               <table style={{ width: "100%", minWidth: 560, borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    {["שם נהג", "טלפון", "הזדמנות"].map((h) => (
+                    {["שם נהג", "טלפון", "לקוח"].map((h) => (
                       <th key={h} style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
                         {h}
                       </th>
@@ -806,7 +806,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
                           href={`/pipeline?openOpportunityId=${encodeURIComponent(d.opportunityId)}`}
                           style={{ color: "#4c1d95", fontWeight: 700 }}
                         >
-                          {d.opportunityName || "הזדמנות"}
+                          {d.opportunityName || "לקוח"}
                         </a>
                       </td>
                     </tr>
