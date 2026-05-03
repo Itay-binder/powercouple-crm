@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Deal = {
   id: string;
   name: string;
+  pipelineId?: string;
+  pipelineStage?: string;
   clientCount?: number;
   dealType?: string;
   city?: string;
@@ -19,14 +21,23 @@ type Deal = {
   notes?: string;
 };
 
+type Pipeline = { id: string; name: string; stages: string[] };
+
 export default function DealDetailClient({ id }: { id: string }) {
   const router = useRouter();
   const [deal, setDeal] = useState<Deal | null>(null);
   const [contacts, setContacts] = useState<Record<string, { name: string; phone: string }>>({});
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [draft, setDraft] = useState<Partial<Deal>>({});
+
+  const stagesForDraft = useMemo(() => {
+    const pid = draft.pipelineId?.trim();
+    if (!pid) return [];
+    return pipelines.find((p) => p.id === pid)?.stages ?? [];
+  }, [draft.pipelineId, pipelines]);
 
   async function load() {
     setErr(null);
@@ -64,6 +75,25 @@ export default function DealDetailClient({ id }: { id: string }) {
     void load();
   }, [id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/opportunities/pipelines?scope=property_deal", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        const j = (await res.json()) as { ok?: boolean; pipelines?: Pipeline[] };
+        if (!cancelled && res.ok && j.ok) setPipelines(j.pipelines ?? []);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function save() {
     if (!deal) return;
     setSaving(true);
@@ -75,6 +105,8 @@ export default function DealDetailClient({ id }: { id: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: draft.name,
+          pipelineId: draft.pipelineId?.trim() ?? "",
+          pipelineStage: draft.pipelineStage?.trim() ?? "",
           clientCount: draft.clientCount,
           dealType: draft.dealType,
           city: draft.city,
@@ -139,6 +171,51 @@ export default function DealDetailClient({ id }: { id: string }) {
                 onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
                 style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
               />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280" }}>פייפליין</span>
+              <select
+                value={draft.pipelineId ?? ""}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  if (!pid) {
+                    setDraft((d) => ({ ...d, pipelineId: undefined, pipelineStage: undefined }));
+                    return;
+                  }
+                  const p = pipelines.find((x) => x.id === pid);
+                  const first = p?.stages?.[0] ?? "";
+                  setDraft((d) => ({
+                    ...d,
+                    pipelineId: pid,
+                    pipelineStage:
+                      d.pipelineStage && p?.stages?.includes(d.pipelineStage) ? d.pipelineStage : first || undefined,
+                  }));
+                }}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              >
+                <option value="">ללא פייפליין</option>
+                {pipelines.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280" }}>שלב בפייפליין</span>
+              <select
+                value={draft.pipelineStage ?? ""}
+                disabled={!draft.pipelineId?.trim() || stagesForDraft.length === 0}
+                onChange={(e) => setDraft((d) => ({ ...d, pipelineStage: e.target.value || undefined }))}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              >
+                <option value="">—</option>
+                {stagesForDraft.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
             </label>
             <label style={{ display: "grid", gap: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280" }}>סוג עסקה (שליש / מלא)</span>

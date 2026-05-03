@@ -35,6 +35,8 @@ export async function PATCH(
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const deal = await updatePropertyDeal(id, {
       name: typeof body.name === "string" ? body.name : undefined,
+      pipelineId: typeof body.pipelineId === "string" ? body.pipelineId : undefined,
+      pipelineStage: typeof body.pipelineStage === "string" ? body.pipelineStage : undefined,
       clientCount: typeof body.clientCount === "number" ? body.clientCount : undefined,
       dealType: typeof body.dealType === "string" ? body.dealType : undefined,
       city: typeof body.city === "string" ? body.city : undefined,

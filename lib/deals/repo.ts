@@ -4,6 +4,10 @@ import { getAdminDb } from "@/lib/firebase/admin";
 export type PropertyDealRecord = {
   id: string;
   name: string;
+  /** פייפליין עסקאות נדל״ן (`scope: property_deal`) */
+  pipelineId?: string;
+  /** שלב בתוך הפייפליין */
+  pipelineStage?: string;
   clientCount?: number;
   dealType?: string;
   city?: string;
@@ -42,6 +46,8 @@ function readDealDoc(id: string, d: Record<string, unknown>): PropertyDealRecord
   return {
     id,
     name: String(d.name ?? "").trim() || "ללא שם",
+    pipelineId: typeof d.pipelineId === "string" ? d.pipelineId.trim() : undefined,
+    pipelineStage: typeof d.pipelineStage === "string" ? d.pipelineStage.trim() : undefined,
     clientCount: typeof d.clientCount === "number" ? d.clientCount : undefined,
     dealType: typeof d.dealType === "string" ? d.dealType : undefined,
     city: typeof d.city === "string" ? d.city : undefined,
@@ -72,6 +78,8 @@ export async function getPropertyDeal(id: string): Promise<PropertyDealRecord | 
 
 export type UpsertPropertyDealInput = {
   name: string;
+  pipelineId?: string;
+  pipelineStage?: string;
   clientCount?: number;
   dealType?: string;
   city?: string;
@@ -89,8 +97,12 @@ export async function createPropertyDeal(input: UpsertPropertyDealInput): Promis
   const name = input.name.trim();
   if (!name) throw new Error("שם עסקה נדרש");
   const now = FieldValue.serverTimestamp();
+  const pid = input.pipelineId?.trim();
+  const pst = input.pipelineStage?.trim();
   const ref = await db.collection(COLLECTION).add({
     name,
+    ...(pid ? { pipelineId: pid } : {}),
+    ...(pst ? { pipelineStage: pst } : {}),
     clientCount: typeof input.clientCount === "number" ? input.clientCount : 0,
     dealType: input.dealType?.trim() ?? "",
     city: input.city?.trim() ?? "",
@@ -119,6 +131,14 @@ export async function updatePropertyDeal(
 
   const payload: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
   if (patch.name != null) payload.name = patch.name.trim();
+  if (patch.pipelineId !== undefined) {
+    const x = patch.pipelineId.trim();
+    payload.pipelineId = x || FieldValue.delete();
+  }
+  if (patch.pipelineStage !== undefined) {
+    const x = patch.pipelineStage.trim();
+    payload.pipelineStage = x || FieldValue.delete();
+  }
   if (patch.clientCount != null) payload.clientCount = patch.clientCount;
   if (patch.dealType != null) payload.dealType = patch.dealType.trim();
   if (patch.city != null) payload.city = patch.city.trim();

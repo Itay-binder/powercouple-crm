@@ -22,7 +22,7 @@ import {
 
 const PIPELINES_LIST_CACHE_TTL_MS = 45_000;
 
-export type PipelineScope = "opportunity" | "moving_order";
+export type PipelineScope = "opportunity" | "moving_order" | "property_deal";
 
 export type PipelineRecord = {
   id: string;
@@ -173,8 +173,10 @@ function normalizeStages(stages: string[]): string[] {
   return Array.from(new Set(out));
 }
 
-function readPipelineScope(d: Record<string, unknown>): PipelineScope {
-  return d.scope === "moving_order" ? "moving_order" : "opportunity";
+export function readPipelineScope(d: Record<string, unknown>): PipelineScope {
+  if (d.scope === "moving_order") return "moving_order";
+  if (d.scope === "property_deal") return "property_deal";
+  return "opportunity";
 }
 
 function opportunityStagesByPipelineId(
@@ -431,7 +433,12 @@ export async function createPipeline(input: CreatePipelineInput): Promise<Pipeli
   if (stages.length === 0) throw new Error("At least one stage is required");
 
   const now = FieldValue.serverTimestamp();
-  const scope: PipelineScope = input.scope ?? "opportunity";
+  const scope: PipelineScope =
+    input.scope === "moving_order"
+      ? "moving_order"
+      : input.scope === "property_deal"
+        ? "property_deal"
+        : "opportunity";
   const ref = await db.collection("pipelines").add({
     name,
     stages,
@@ -1339,7 +1346,9 @@ export async function updatePipeline(
       const coll =
         prevScope === "moving_order"
           ? await db.collection("movingOrders").where("pipelineId", "==", id).get()
-          : await db.collection("opportunities").where("pipelineId", "==", id).get();
+          : prevScope === "property_deal"
+            ? await db.collection("property_deals").where("pipelineId", "==", id).get()
+            : await db.collection("opportunities").where("pipelineId", "==", id).get();
       for (const removedStage of removed) {
         const removedIdx = prevStages.indexOf(removedStage);
         let fallback = nextStages[0];
@@ -1354,13 +1363,21 @@ export async function updatePipeline(
         let touched = 0;
         for (const doc of coll.docs) {
           const d = (doc.data() ?? {}) as Record<string, unknown>;
-          if (String(d.stage ?? "") === removedStage) {
+          const stageVal =
+            prevScope === "property_deal"
+              ? String(d.pipelineStage ?? "")
+              : String(d.stage ?? "");
+          if (stageVal === removedStage) {
             const extra: Record<string, unknown> = {
-              stage: fallback,
               updatedAt: FieldValue.serverTimestamp(),
             };
-            if (prevScope === "moving_order") {
-              extra.status = statusFromStage(fallback);
+            if (prevScope === "property_deal") {
+              extra.pipelineStage = fallback;
+            } else {
+              extra.stage = fallback;
+              if (prevScope === "moving_order") {
+                extra.status = statusFromStage(fallback);
+              }
             }
             batch.set(doc.ref, extra, { merge: true });
             touched++;
@@ -1454,6 +1471,11 @@ export async function deletePipeline(id: string): Promise<void> {
     const snap = await db.collection("movingOrders").where("pipelineId", "==", id).limit(1).get();
     if (!snap.empty) {
       throw new Error("Cannot delete pipeline with existing orders");
+    }
+  } else if (scope === "property_deal") {
+    const snap = await db.collection("property_deals").where("pipelineId", "==", id).limit(1).get();
+    if (!snap.empty) {
+      throw new Error("לא ניתן למחוק פייפליין שיש בו עסקאות");
     }
   } else {
     const snap = await db.collection("opportunities").where("pipelineId", "==", id).limit(1).get();

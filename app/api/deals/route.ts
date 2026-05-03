@@ -32,6 +32,8 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const deal = await createPropertyDeal({
       name: String(body.name ?? ""),
+      pipelineId: typeof body.pipelineId === "string" ? body.pipelineId : undefined,
+      pipelineStage: typeof body.pipelineStage === "string" ? body.pipelineStage : undefined,
       clientCount: typeof body.clientCount === "number" ? body.clientCount : undefined,
       dealType: typeof body.dealType === "string" ? body.dealType : undefined,
       city: typeof body.city === "string" ? body.city : undefined,
