@@ -1,0 +1,34 @@
+# Hobby ב-Vercel לא מאפשר Cron יותר מפעם ביום — לכן אין crons ב-vercel.json.
+# כאן: קריאה ל-/api/cron/task-webhooks בקצב גבוה. GitHub עלול לדחות scheduled runs בעומס —
+# אם רואים עיכובים של עשרות דק׳, הוסיפו שירות חיצוני (למשל cron-job.org) לאותו URL כל דקה.
+#
+# Secrets (Repo → Settings → Secrets and variables → Actions):
+#   CRM_SITE_URL   — כתובת production ללא סלאש בסוף, למשל https://powercouple-crm.vercel.app
+#   CRON_SECRET    — אותו ערך כמו CRON_SECRET ב-Vercel (Bearer)
+
+name: Task webhooks (cron)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping task webhooks
+        env:
+          CRM_SITE_URL: ${{ secrets.CRM_SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -e
+          if [ -z "${CRM_SITE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::notice::דילוג: הגדר secrets CRM_SITE_URL ו-CRON_SECRET כדי להפעיל sweep (תזכורות משימות)."
+            exit 0
+          fi
+          BASE="${CRM_SITE_URL%/}"
+          curl -sS -f -H "Authorization: Bearer ${CRON_SECRET}" "${BASE}/api/cron/task-webhooks"

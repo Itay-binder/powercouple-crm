@@ -1,0 +1,99 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-rubik), "Rubik", system-ui, sans-serif;
+  font-weight: 400;
+  background: #ffffff;
+  color: #111827;
+  line-height: 1.5;
+}
+
+/* CRM shell — נוח במובייל ובמסכים צרים */
+@media (max-width: 900px) {
+  .crm-shell-layout {
+    flex-direction: column;
+  }
+
+  .crm-shell-aside {
+    width: 100% !important;
+    min-height: 0;
+    border-right: none !important;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 14px !important;
+  }
+
+  .crm-shell-aside-top {
+    margin-bottom: 10px !important;
+  }
+
+  .crm-shell-nav {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px !important;
+  }
+
+  .crm-shell-nav .crm-nav-link {
+    flex: 1 1 auto;
+    min-width: min(168px, 47%);
+    text-align: center;
+    font-size: 13px;
+    padding: 9px 8px !important;
+  }
+
+  .crm-shell-main {
+    padding: 12px 14px !important;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .wa-section-title {
+    font-size: 22px !important;
+  }
+
+  .wa-section-subtitle {
+    font-size: 13px !important;
+    margin-bottom: 14px !important;
+  }
+
+  .triggers-settings-title {
+    font-size: 22px !important;
+  }
+}
+
+a {
+  color: inherit;
+}
+
+@keyframes crm-confetti-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.crm-confetti-piece {
+  position: fixed;
+  top: -12px;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 200;
+  animation: crm-confetti-fall 2.4s ease-in forwards;
+}
+

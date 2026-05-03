@@ -1,0 +1,17 @@
+{
+  "contact": {
+    "תזלקוח": "contact_id_number",
+    "כתובת מגורים": "contact_address",
+    "שם מלא ": "contact_full_name"
+  },
+  "opportunity": {
+    "מוצר לרכישה": "opportunity_product",
+    "לינק לתשלום": "opportunity_payment_link",
+    "סטטוס נוסף": "opportunity_extra_status",
+    "מתי ליצור קשר?": "opportunity_contact_when",
+    "Deal - שולם עד כה": "opportunity_paid_so_far",
+    "כמה שולם": "opportunity_amount_paid",
+    "כמה נותר לתשלום ": "opportunity_amount_remaining",
+    "האם בוצע תשלום  מלא": "opportunity_fully_paid"
+  }
+}

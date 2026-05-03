@@ -1,0 +1,113 @@
+# Push / workflow_dispatch → Deploy ל-Vercel.
+#
+# מסלול מומלץ כשה-Hook "ירוק" אבל אין deploy ברור:
+#   VERCEL_TOKEN + VERCEL_ORG_ID + VERCEL_PROJECT_ID
+#   → vercel deploy --prod על הקוד ש-checkout כבר משך (אותו commit כמו ב-GitHub).
+#
+# מסלול חלופי (רק hook):
+#   VERCEL_DEPLOY_HOOK_URL — Vercel מושך מהרפו המחובר; תלוי חיבור Git ב-Vercel.
+#
+# אין צורך ב-"משתני סביבה" נוספים ב-GitHub בשביל שהריצה תתחיל; חסרים env ב-Vercel
+# גורמים בדרך כלל ל-build שנכשל (עם לוג), לא להיעלמות של הריצה.
+
+name: Deploy to Vercel
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vercel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Context (debug)
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "run_id=${{ github.run_id }}"
+          echo "repository=${{ github.repository }}"
+          echo "ref=${{ github.ref }}"
+          echo "sha=${{ github.sha }}"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Deploy (CLI או Hook)
+        env:
+          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -e
+          HOOK_TRIM=$(printf '%s' "${HOOK_URL:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+          if [ -n "${VERCEL_TOKEN:-}" ] && [ -n "${VERCEL_ORG_ID:-}" ] && [ -n "${VERCEL_PROJECT_ID:-}" ]; then
+            echo ">>> Vercel CLI — מעלה את העץ מהריצה (commit ${{ github.sha }})"
+            mkdir -p .vercel
+            node -e "require('fs').writeFileSync('.vercel/project.json', JSON.stringify({orgId:process.env.VERCEL_ORG_ID, projectId:process.env.VERCEL_PROJECT_ID}))"
+            npx --yes vercel@latest deploy --prod --token "$VERCEL_TOKEN"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              echo "### Vercel (CLI)" >> "$GITHUB_STEP_SUMMARY"
+              echo "Deploy ל-production מה-checkout של GitHub Actions — אותו commit כמו הריצה." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo ">>> OK (CLI)"
+            exit 0
+          fi
+
+          if [ -z "$HOOK_TRIM" ]; then
+            echo "::error::חסר: שלושת VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID (מומלץ), או VERCEL_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+
+          echo ">>> POST Deploy Hook (${#HOOK_TRIM} chars)"
+          HTTP=$(curl -sS -o /tmp/hook_body.out -w "%{http_code}" -X POST "$HOOK_TRIM")
+          echo ">>> HTTP: $HTTP"
+          echo ">>> Body:"
+          cat /tmp/hook_body.out
+          echo
+          if [ "$HTTP" != "200" ] && [ "$HTTP" != "201" ] && [ "$HTTP" != "204" ]; then
+            echo "::error::Deploy hook returned HTTP $HTTP"
+            exit 1
+          fi
+          python3 <<'PY'
+          import json, sys, os
+          try:
+              with open("/tmp/hook_body.out", "r", encoding="utf-8") as f:
+                  data = json.load(f)
+          except json.JSONDecodeError as e:
+              print(f"::error::התגובה לא JSON תקין ({e}) — בדוק שה-URL ב-secret הוא Deploy Hook מלא מ-Vercel")
+              sys.exit(1)
+          err = data.get("error") or data.get("message")
+          if err:
+              print(f"::error::Vercel: {err}")
+              sys.exit(1)
+          job = data.get("job")
+          jid = job.get("id") if isinstance(job, dict) else None
+          if not jid:
+              print(f"::error::אין job.id בתגובה — לא נוצר job ב-Vercel. תוכן: {data!r}")
+              sys.exit(1)
+          state = job.get("state") if isinstance(job, dict) else None
+          print(f">>> Vercel job: id={jid} state={state}")
+          sha = (os.environ.get("GITHUB_SHA") or "")[:7]
+          print(f"::notice::Vercel job id: {jid}  |  commit {sha}")
+          gss = os.environ.get("GITHUB_STEP_SUMMARY")
+          if gss:
+              with open(gss, "a", encoding="utf-8") as f:
+                  f.write("### Vercel Deploy Hook\n\n")
+                  f.write(f"- **Job id:** `{jid}`\n")
+                  f.write(f"- **Commit:** `{sha}`\n\n")
+                  f.write("ירוק כאן = Vercel קיבל את ה-hook. אם אין שורה ב-Deployments — נסה מסלול **CLI** (טוקן + org + project ב-secrets).\n")
+          PY
+          echo ">>> OK (hook)"

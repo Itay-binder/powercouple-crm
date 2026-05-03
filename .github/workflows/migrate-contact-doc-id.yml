@@ -1,0 +1,66 @@
+# הרצה ידנית: מיגרציית מזהה מסמך leads → טלפון מנורמל (עדכון הזדמנויות / externalRefs / הזמנות).
+# דורש ב-GitHub → Settings → Secrets: FIREBASE_SERVICE_ACCOUNT_JSON (מלא).
+# אופציונלי: FIRESTORE_DATABASE_ID אם לא משתמשים ב-(default).
+#
+# 1) הרצה ראשונה עם dry_run=true (ברירת מחדל) — בודקים בלוגים את fromId/toId וספירות.
+# 2) הרצה שנייה עם dry_run=false — מבצעת את השינוי.
+
+name: Migrate contact doc id to phone
+
+on:
+  workflow_dispatch:
+    inputs:
+      match_name:
+        description: שם מלא מדויק (שדה name באיש קשר)
+        default: "ואדי קאסים"
+        type: string
+      from_contact_id:
+        description: אופציונלי — מזהה מסמך נוכחי אם השם לא ייחודי
+        required: false
+        type: string
+      database_id:
+        description: אופציונלי — שם מסד Firestore (ריק = משתנה סביבה / ברירת מחדל)
+        required: false
+        type: string
+      dry_run:
+        description: true = סימולציה בלבד, false = ביצוע מיגרציה
+        type: boolean
+        default: true
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Run migration
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIRESTORE_DATABASE_ID: ${{ secrets.FIRESTORE_DATABASE_ID }}
+          MATCH_NAME: ${{ inputs.match_name }}
+          FROM_ID: ${{ inputs.from_contact_id }}
+          DB_ID: ${{ inputs.database_id }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FIREBASE_SERVICE_ACCOUNT_JSON:-}" ]; then
+            echo "::error::חסר secret FIREBASE_SERVICE_ACCOUNT_JSON"
+            exit 1
+          fi
+          ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+          if [ -n "${DB_ID:-}" ]; then ARGS+=(--database-id "$DB_ID"); fi
+          if [ -n "${FROM_ID:-}" ]; then
+            ARGS+=(--from-contact-id "$FROM_ID")
+          else
+            ARGS+=(--match-name "$MATCH_NAME")
+          fi
+          npm run migrate:contact-phone -- "${ARGS[@]}"
