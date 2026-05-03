@@ -14,6 +14,11 @@ import { ensureMovingOrdersIntakePipeline } from "@/lib/movingOrders/ensureIntak
 import { MOVING_ORDERS_INTAKE_PIPELINE_ID } from "@/lib/movingOrders/pipelineConstants";
 import { statusFromStage } from "@/lib/movingOrders/stageSync";
 import { normalizePhone } from "@/lib/leads/repo";
+import {
+  PC_SALES_PIPELINE_NAME,
+  PC_SALES_STAGES,
+  PC_WON_STAGE_LABEL,
+} from "@/lib/product/powercoupleSpec";
 
 const PIPELINES_LIST_CACHE_TTL_MS = 45_000;
 
@@ -201,7 +206,7 @@ export async function getPipelineById(id: string): Promise<PipelineRecord | null
 }
 
 /** Pipeline stage name that triggers win automation (note + customer pipeline opportunity). */
-export const WON_PIPELINE_STAGE_LABEL = "זכיה";
+export const WON_PIPELINE_STAGE_LABEL = PC_WON_STAGE_LABEL;
 
 const CUSTOMERS_PIPELINE_ID = "customers";
 
@@ -300,10 +305,20 @@ function normalizeOpportunityStageByPipeline(
   pipelineId: string,
   stageRaw: unknown
 ): string {
-  const stage = String(stageRaw ?? "").trim();
+  let stage = String(stageRaw ?? "").trim();
   const stages = pipelineStagesById.get(pipelineId) ?? [];
   if (stages.length === 0) return stage || "Pending";
+  /** מיפוי legacy «זכיה» לשלב רכישת דירה בפייפליין החדש */
+  if (normalizeStageLabel(stage) === "זכיה") {
+    const win = stages.find(
+      (s) => normalizeStageLabel(s) === normalizeStageLabel(WON_PIPELINE_STAGE_LABEL)
+    );
+    if (win) return win;
+  }
   if (stage && stages.includes(stage)) return stage;
+  const ns = normalizeStageLabel(stage);
+  const hit = stages.find((s) => normalizeStageLabel(s) === ns);
+  if (hit) return hit;
   return stages[0];
 }
 
@@ -311,35 +326,57 @@ export async function ensureDefaultPipeline(): Promise<PipelineRecord> {
   const db = await getAdminDb();
   const ref = db.collection("pipelines").doc("default-sales");
   const snap = await ref.get();
+  const now = FieldValue.serverTimestamp();
+
   if (!snap.exists) {
-    const now = FieldValue.serverTimestamp();
     await ref.set({
-      name: "מוקד מכירות",
-      stages: ["Pending", "Contacted", "Proposal Sent", "זכיה", "Closed"],
+      name: PC_SALES_PIPELINE_NAME,
+      stages: [...PC_SALES_STAGES],
       scope: "opportunity",
       createdAt: now,
       updatedAt: now,
     });
   } else {
     const d0 = (snap.data() ?? {}) as Record<string, unknown>;
-    const cur = normalizeStages((d0.stages as string[] | undefined) ?? []);
-    if (!cur.some((s) => normalizeStageLabel(s) === WON_PIPELINE_STAGE_LABEL)) {
-      const insertAt = Math.max(0, cur.length - 1);
-      const next = [...cur.slice(0, insertAt), WON_PIPELINE_STAGE_LABEL, ...cur.slice(insertAt)];
-      await ref.update({
-        stages: normalizeStages(next),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+    let cur = normalizeStages((d0.stages as string[] | undefined) ?? []);
+    cur = cur.map((s) =>
+      normalizeStageLabel(s) === "זכיה" ? WON_PIPELINE_STAGE_LABEL : s
+    );
+    const pick = new Set<string>();
+    const merged: string[] = [];
+    for (const s of PC_SALES_STAGES) {
+      const key = normalizeStageLabel(s);
+      if (!pick.has(key)) {
+        merged.push(s);
+        pick.add(key);
+      }
     }
+    for (const s of cur) {
+      const key = normalizeStageLabel(s);
+      if (!pick.has(key)) {
+        merged.push(s);
+        pick.add(key);
+      }
+    }
+    const prevName = String(d0.name ?? "").trim();
+    const nextName =
+      prevName === "מוקד מכירות" || prevName === "" ? PC_SALES_PIPELINE_NAME : prevName;
+    await ref.set(
+      {
+        name: nextName,
+        stages: normalizeStages(merged),
+        updatedAt: now,
+      },
+      { merge: true }
+    );
   }
+
   const again = await ref.get();
   const d = (again.data() ?? {}) as Record<string, unknown>;
   return {
     id: again.id,
-    name: String(d.name ?? "מוקד מכירות"),
-    stages: normalizeStages(
-      (d.stages as string[] | undefined) ?? ["Pending", "Contacted", "Proposal Sent", "זכיה", "Closed"]
-    ),
+    name: String(d.name ?? PC_SALES_PIPELINE_NAME),
+    stages: normalizeStages((d.stages as string[] | undefined) ?? [...PC_SALES_STAGES]),
     scope: readPipelineScope(d),
     createdAt: mapTs(d.createdAt),
     updatedAt: mapTs(d.updatedAt),

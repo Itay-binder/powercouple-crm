@@ -6,6 +6,7 @@ import {
 import { listLeadsFiltered, upsertLead } from "@/lib/leads/repo";
 import { phoneSearchMatches } from "@/lib/phoneSearch";
 import { validateCustomValues } from "@/lib/customFields/repo";
+import { isAdminEmail } from "@/lib/auth/profile";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,11 +30,23 @@ export async function GET(req: NextRequest) {
   const dateFrom = req.nextUrl.searchParams.get("date_from");
   const dateTo = req.nextUrl.searchParams.get("date_to");
   const phoneQ = req.nextUrl.searchParams.get("phone")?.trim() ?? "";
+  const mineOnly = req.nextUrl.searchParams.get("mine") === "1";
 
   try {
     let leads = await listLeadsFiltered(dateFrom, dateTo);
     if (phoneQ) {
       leads = leads.filter((l) => phoneSearchMatches(l.phone, phoneQ));
+    }
+
+    if (mineOnly && auth.ok && auth.user?.email) {
+      const adminUser =
+        auth.user.profile.role === "admin" || isAdminEmail(auth.user.email);
+      if (!adminUser) {
+        const em = auth.user.email.trim().toLowerCase();
+        leads = leads.filter(
+          (l) => (l.assignedRep ?? "").trim().toLowerCase() === em
+        );
+      }
     }
 
     // Build dynamic headers based on customFields keys too.

@@ -145,8 +145,17 @@ function asDateKey(raw: string): string | null {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-export default function ContactsClient() {
+export type ContactsClientProps = {
+  initialAssigneeScope?: "all" | "mine";
+  canToggleAssigneeScope?: boolean;
+};
+
+export default function ContactsClient({
+  initialAssigneeScope = "all",
+  canToggleAssigneeScope = false,
+}: ContactsClientProps) {
   const searchParams = useSearchParams();
+  const [assigneeScope, setAssigneeScope] = useState<"all" | "mine">(initialAssigneeScope);
   const [err, setErr] = useState<string | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
@@ -222,9 +231,10 @@ export default function ContactsClient() {
     const params = new URLSearchParams();
     if (dateFrom.trim()) params.set("date_from", dateFrom.trim());
     if (dateTo.trim()) params.set("date_to", dateTo.trim());
+    if (assigneeScope === "mine") params.set("mine", "1");
     const q = params.toString();
     return q ? `?${q}` : "";
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, assigneeScope]);
 
   const contactsKey = `/api/contacts${query}`;
 
@@ -795,6 +805,42 @@ export default function ContactsClient() {
         >
           {filteredRows.length} / {count}
         </span>
+
+        {canToggleAssigneeScope ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#6b7280" }}>תצוגה:</span>
+            <button
+              type="button"
+              onClick={() => setAssigneeScope("all")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 10,
+                border: assigneeScope === "all" ? "2px solid #6d28d9" : "1px solid #e5e7eb",
+                background: assigneeScope === "all" ? "#f5f3ff" : "#fff",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              כל הלקוחות
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssigneeScope("mine")}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 10,
+                border: assigneeScope === "mine" ? "2px solid #6d28d9" : "1px solid #e5e7eb",
+                background: assigneeScope === "mine" ? "#f5f3ff" : "#fff",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              הלקוחות שלי
+            </button>
+          </div>
+        ) : assigneeScope === "mine" ? (
+          <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>הלקוחות שלי בלבד</span>
+        ) : null}
 
         <div style={{ flex: 1 }} />
 

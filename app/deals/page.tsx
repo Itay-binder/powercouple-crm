@@ -1,16 +1,15 @@
 import { getCrmSession } from "@/lib/auth/crmSession";
-import { isAdminEmail } from "@/lib/auth/profile";
 import { authDisabled } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 import CrmShell from "@/app/components/CrmShell";
-import ContactsClient from "@/app/contacts/ContactsClient";
+import DealsClient from "@/app/deals/DealsClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function ContactsPage() {
+export default async function DealsPage() {
   if (authDisabled()) redirect("/login");
   const ctx = await getCrmSession();
-  if (ctx.kind === "anon") redirect("/login?returnTo=/contacts");
+  if (ctx.kind === "anon") redirect("/login?returnTo=/deals");
   if (ctx.kind === "forbidden") {
     return (
       <CrmShell
@@ -24,18 +23,13 @@ export default async function ContactsPage() {
     );
   }
 
-  const isAdmin = ctx.profile.role === "admin" || isAdminEmail(ctx.profile.email);
-
   return (
     <CrmShell
       email={ctx.profile.email}
       tenants={ctx.accessibleTenants.map((t) => ({ id: t.id, label: t.label }))}
       currentTenantId={ctx.tenant.id}
     >
-      <ContactsClient
-        initialAssigneeScope={isAdmin ? "all" : "mine"}
-        canToggleAssigneeScope={isAdmin}
-      />
+      <DealsClient />
     </CrmShell>
   );
 }

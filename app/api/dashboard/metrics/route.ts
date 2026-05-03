@@ -6,6 +6,7 @@ import { listMovingOrders } from "@/lib/movingOrders/repo";
 import { assertMovingOrdersWorkspace } from "@/lib/movingOrders/guard";
 import { getCityRegionRows } from "@/lib/movingOrders/cityRegionSettingsRepo";
 import {
+  ensureDefaultPipeline,
   getPayingCustomersPipelineId,
   getPayingCustomersPipelineMeta,
   listOpportunities,
@@ -58,6 +59,10 @@ type ApiOk = {
     }>;
   }>;
   movingOrdersWorkspace: boolean;
+  /** Power Couple — פייפליין מכירות */
+  salesPipelineId: string;
+  salesPipelineName: string;
+  salesStageCounts: Record<string, number>;
   warning?: string;
 };
 type ApiErr = { ok: false; error: string };
@@ -217,13 +222,23 @@ export async function GET(req: NextRequest) {
   const dateTo = req.nextUrl.searchParams.get("date_to");
 
   try {
-    const [payingPipelineId, payingMeta, allOpportunities, allLeads, cityRegionRows] = await Promise.all([
-      getPayingCustomersPipelineId(),
-      getPayingCustomersPipelineMeta(),
-      listOpportunities(),
-      listLeadsFiltered(),
-      getCityRegionRows(),
-    ]);
+    const [payingPipelineId, payingMeta, allOpportunities, allLeads, cityRegionRows, salesPipeline] =
+      await Promise.all([
+        getPayingCustomersPipelineId(),
+        getPayingCustomersPipelineMeta(),
+        listOpportunities(),
+        listLeadsFiltered(),
+        getCityRegionRows(),
+        ensureDefaultPipeline(),
+      ]);
+
+    const salesOpps = allOpportunities.filter((o) => o.pipelineId === salesPipeline.id);
+    const salesStageCounts: Record<string, number> = {};
+    for (const s of salesPipeline.stages) salesStageCounts[s] = 0;
+    for (const o of salesOpps) {
+      const k = o.stage || "—";
+      salesStageCounts[k] = (salesStageCounts[k] ?? 0) + 1;
+    }
 
     const inRangeAll = opportunitiesInDateRange(allOpportunities, dateFrom, dateTo);
     const payingAll = allOpportunities.filter((o) => o.pipelineId === payingPipelineId);
@@ -275,6 +290,9 @@ export async function GET(req: NextRequest) {
       ordersPerMover,
       activeMoversByRegion,
       movingOrdersWorkspace,
+      salesPipelineId: salesPipeline.id,
+      salesPipelineName: salesPipeline.name,
+      salesStageCounts,
       ...(warning ? { warning } : {}),
     };
     return NextResponse.json(payload);

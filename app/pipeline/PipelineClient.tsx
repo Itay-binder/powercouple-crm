@@ -415,6 +415,8 @@ function mergeVisibleColsWithNewKeys(
 
 export default function PipelineClient() {
   const searchParams = useSearchParams();
+  const urlPipelineId = searchParams.get("pipelineId")?.trim() ?? "";
+  const urlStageFocus = searchParams.get("stage")?.trim() ?? "";
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("opportunities");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -516,8 +518,12 @@ export default function PipelineClient() {
 
   const oppForSelectedPipeline = useMemo(() => {
     if (!selectedPipelineId) return opportunities;
-    return opportunities.filter((o) => o.pipelineId === selectedPipelineId);
-  }, [opportunities, selectedPipelineId]);
+    let rows = opportunities.filter((o) => o.pipelineId === selectedPipelineId);
+    if (urlStageFocus) {
+      rows = rows.filter((o) => (o.stage || "—") === urlStageFocus);
+    }
+    return rows;
+  }, [opportunities, selectedPipelineId, urlStageFocus]);
 
   const grouped = useMemo(() => {
     const map: Record<string, Opportunity[]> = {};
@@ -532,6 +538,13 @@ export default function PipelineClient() {
     }
     return map;
   }, [oppForSelectedPipeline, selectedPipeline]);
+
+  useEffect(() => {
+    if (!urlPipelineId || pipelines.length === 0) return;
+    if (pipelines.some((p) => p.id === urlPipelineId)) {
+      setSelectedPipelineId(urlPipelineId);
+    }
+  }, [urlPipelineId, pipelines]);
 
   const {
     data: pipelineData,

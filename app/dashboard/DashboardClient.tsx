@@ -33,6 +33,9 @@ type DashboardMetricsOk = {
     }>;
   }>;
   movingOrdersWorkspace: boolean;
+  salesPipelineId: string;
+  salesPipelineName: string;
+  salesStageCounts: Record<string, number>;
   warning?: string;
 };
 type DashboardMetricsErr = { ok: false; error: string };
@@ -697,6 +700,36 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
       {metrics?.warning && (
         <div style={{ marginTop: 14, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", padding: 12, borderRadius: 12 }}>
           {metrics.warning}
+        </div>
+      )}
+
+      {metrics && Object.keys(metrics.salesStageCounts ?? {}).length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+            ניהול לקוחות · {metrics.salesPipelineName}
+          </div>
+          <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, lineHeight: 1.45 }}>
+            ספירת לקוחות (הזדמנויות) לפי שלב בפייפליין. לחיצה פותחת את לוח הניהול מסונן לשלב.
+          </div>
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+            {Object.entries(metrics.salesStageCounts).map(([stage, count]) => (
+              <a
+                key={stage}
+                href={`/pipeline?pipelineId=${encodeURIComponent(metrics.salesPipelineId)}&stage=${encodeURIComponent(stage)}`}
+                style={{
+                  textDecoration: "none",
+                  background: "#fff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 14,
+                  padding: 14,
+                  color: "inherit",
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 800 }}>{stage}</div>
+                <div style={{ fontSize: 28, fontWeight: 900, color: "#059669", marginTop: 6 }}>{prettyCount(count)}</div>
+              </a>
+            ))}
+          </div>
         </div>
       )}
 

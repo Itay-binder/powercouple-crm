@@ -1,6 +1,7 @@
 import UserMenu from "@/app/components/UserMenu";
 import CrmNavLink from "@/app/components/CrmNavLink";
 import CrmGlobalNotifications from "@/app/components/CrmGlobalNotifications";
+import CrmGlobalSearch from "@/app/components/CrmGlobalSearch";
 import { isMovingOrdersTenant } from "@/lib/tenant/movingOrders";
 
 export type CrmTenantOption = { id: string; label: string };
@@ -44,27 +45,34 @@ export default function CrmShell({
           className="crm-shell-aside-top"
           style={{
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            flexDirection: "column",
             gap: 12,
             marginBottom: 18,
           }}
         >
-          <div style={{ lineHeight: 1.1 }}>
-            <div style={{ fontWeight: 800 }}>Power Couple CRM</div>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>קליטת לקוחות</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ lineHeight: 1.1 }}>
+              <div style={{ fontWeight: 800 }}>Power Couple CRM</div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>קליטת לקוחות</div>
+            </div>
+            <UserMenu
+              email={email}
+              tenants={tenants}
+              currentTenantId={currentTenantId}
+            />
           </div>
-          <UserMenu
-            email={email}
-            tenants={tenants}
-            currentTenantId={currentTenantId}
-          />
+          <CrmGlobalSearch />
         </div>
 
         <nav className="crm-shell-nav" style={{ display: "grid", gap: 8, marginTop: 8 }}>
-          <CrmNavLink href="/dashboard" label={'דשבורד מנכ"ל'} />
-          <CrmNavLink href="/contacts" label="אנשי קשר" />
-          <CrmNavLink href="/pipeline" label="ניהול הזדמנויות" />
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 4 }}>ראשי</div>
+          <CrmNavLink href="/dashboard" label="דשבורד" />
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>ניהול לקוחות</div>
+          <CrmNavLink href="/contacts" label="טבלת לידים" />
+          <CrmNavLink href="/pipeline" label="פייפליינים" />
+          <CrmNavLink href="/deals" label="עסקאות נדל״ן" />
+          <CrmNavLink href="/inquiries" label="פניות" />
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>תפעול</div>
           <CrmNavLink href="/tasks" label="משימות" />
           <CrmNavLink href="/calendar" label="לוח שנה" />
           {isMovingOrdersTenant(currentTenantId) ? (
