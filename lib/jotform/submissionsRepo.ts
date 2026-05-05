@@ -88,6 +88,7 @@ export async function upsertJotformSubmission(input: {
 export async function listJotformSubmissionsByTarget(input: {
   contactId?: string;
   opportunityId?: string;
+  formId?: string;
 }): Promise<JotformSubmissionRecord[]> {
   const db = await getAdminDb();
   let snap;
@@ -95,6 +96,8 @@ export async function listJotformSubmissionsByTarget(input: {
     snap = await db.collection(COLLECTION).where("opportunityId", "==", input.opportunityId.trim()).limit(100).get();
   } else if (input.contactId?.trim()) {
     snap = await db.collection(COLLECTION).where("contactId", "==", input.contactId.trim()).limit(100).get();
+  } else if (input.formId?.trim()) {
+    snap = await db.collection(COLLECTION).where("formId", "==", input.formId.trim()).limit(200).get();
   } else {
     return [];
   }

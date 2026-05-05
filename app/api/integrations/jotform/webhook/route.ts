@@ -26,6 +26,50 @@ type Answer = {
   fileUrls: string[];
 };
 
+function parseJsonSafely(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function parseWebhookBody(req: NextRequest): Promise<Record<string, unknown>> {
+  const ct = (req.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("application/json")) {
+    return ((await req.json().catch(() => ({}))) as Record<string, unknown>) ?? {};
+  }
+  const text = await req.text().catch(() => "");
+  if (!text.trim()) return {};
+
+  if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
+    const params = new URLSearchParams(text);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of params.entries()) out[k] = v;
+    return out;
+  }
+
+  const asJson = parseJsonSafely(text);
+  if (asJson) return asJson;
+  return {};
+}
+
+function extractSubmissionId(payload: Record<string, unknown>): string {
+  const rawRequestObj =
+    typeof payload.rawRequest === "string" ? parseJsonSafely(payload.rawRequest) : null;
+  return String(
+    payload.submissionID ??
+      payload.submission_id ??
+      payload.submissionId ??
+      rawRequestObj?.submissionID ??
+      rawRequestObj?.submission_id ??
+      rawRequestObj?.submissionId ??
+      ""
+  ).trim();
+}
+
 function pickAnswer(answers: Answer[], keywords: string[]): string {
   const lower = keywords.map((k) => k.toLowerCase());
   const a = answers.find((x) => {
@@ -113,9 +157,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
     }
 
-    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const submissionId =
-      String(body.submissionID ?? body.submission_id ?? "").trim();
+    const body = await parseWebhookBody(req);
+    const submissionId = extractSubmissionId(body);
     if (!submissionId) {
       return NextResponse.json({ ok: false, error: "submissionID is required" }, { status: 400 });
     }
