@@ -138,6 +138,14 @@ type TaskItem = {
   syncToGoogleCalendar?: boolean;
   googleCalendarId?: string;
 };
+type JotformSubmissionItem = {
+  id: string;
+  submissionId: string;
+  formId: string;
+  driveFolderUrl?: string;
+  submittedAt: string;
+  answers: Array<{ questionId: string; label: string; type: string; value: string; fileUrls: string[] }>;
+};
 
 type GCalOptOpp = { id: string; summary?: string; primary?: boolean };
 
@@ -449,11 +457,12 @@ export default function PipelineClient() {
   const [manageOppColsOpen, setManageOppColsOpen] = useState(false);
   const [oppDragIndex, setOppDragIndex] = useState<number | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
-  const [oppDetailTab, setOppDetailTab] = useState<"details" | "notes" | "tasks" | "whatsapp" | "greenapi">(
+  const [oppDetailTab, setOppDetailTab] = useState<"details" | "notes" | "tasks" | "jotform" | "whatsapp" | "greenapi">(
     "details"
   );
   const [oppNotes, setOppNotes] = useState<NoteItem[]>([]);
   const [oppTasks, setOppTasks] = useState<TaskItem[]>([]);
+  const [oppJotformSubmissions, setOppJotformSubmissions] = useState<JotformSubmissionItem[]>([]);
   const [oppTaskModal, setOppTaskModal] = useState<
     null | { mode: "new" } | { mode: "edit"; task: TaskItem }
   >(null);
@@ -943,6 +952,19 @@ export default function PipelineClient() {
     setSelectedOpp(j.opportunity);
     setOppNotes(j.opportunity.notes ?? []);
     setOppTasks(j.opportunity.tasks ?? []);
+    const jotRes = await fetch(`/api/jotform/submissions?opportunityId=${encodeURIComponent(id)}`, {
+      credentials: "include",
+      cache: "no-store",
+    }).catch(() => null);
+    if (jotRes) {
+      const jotJson = (await jotRes.json().catch(() => ({}))) as {
+        ok?: boolean;
+        submissions?: JotformSubmissionItem[];
+      };
+      setOppJotformSubmissions(jotRes.ok && jotJson.ok ? (jotJson.submissions ?? []) : []);
+    } else {
+      setOppJotformSubmissions([]);
+    }
     setOppDetailTab("details");
   }
 
@@ -2666,9 +2688,9 @@ export default function PipelineClient() {
               </button>
             </div>
             <div style={{ display: "inline-flex", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
-              {(["details", "notes", "tasks", "whatsapp", "greenapi"] as const).map((t) => (
+              {(["details", "notes", "tasks", "jotform", "whatsapp", "greenapi"] as const).map((t) => (
                 <button key={t} type="button" onClick={() => setOppDetailTab(t)} style={{ border: "none", background: oppDetailTab === t ? "#ede9fe" : "#fff", padding: "8px 10px", cursor: "pointer", fontWeight: 800 }}>
-                  {t === "details" ? "פרטים" : t === "notes" ? "פתקים" : t === "tasks" ? "משימות" : t === "whatsapp" ? "WhatsApp" : "GreenAPI"}
+                  {t === "details" ? "פרטים" : t === "notes" ? "פתקים" : t === "tasks" ? "משימות" : t === "jotform" ? "שאלון Jotform" : t === "whatsapp" ? "WhatsApp" : "GreenAPI"}
                 </button>
               ))}
             </div>
@@ -3150,6 +3172,42 @@ export default function PipelineClient() {
                 >
                   + הוסף משימה
                 </button>
+              </div>
+            )}
+            {oppDetailTab === "jotform" && (
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                {oppJotformSubmissions.length === 0 ? (
+                  <div style={{ color: "#9ca3af", fontWeight: 600, fontSize: 13 }}>אין שאלוני Jotform ללקוח זה</div>
+                ) : (
+                  oppJotformSubmissions.map((sub) => (
+                    <article key={sub.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fafafa", display: "grid", gap: 8 }}>
+                      <div style={{ fontSize: 12, color: "#6b7280", display: "flex", flexWrap: "wrap", gap: 10 }}>
+                        <span>טופס: {sub.formId || "—"}</span>
+                        <span>הגשה: {formatIsraelDateTime(sub.submittedAt)}</span>
+                      </div>
+                      {sub.answers.map((ans) => (
+                        <div key={`${sub.id}-${ans.questionId}`} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: "8px 10px", background: "#fff" }}>
+                          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{ans.label || ans.questionId}</div>
+                          {ans.value?.trim() ? <div style={{ whiteSpace: "pre-wrap" }}>{ans.value}</div> : null}
+                          {ans.fileUrls?.length ? (
+                            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                              {ans.fileUrls.map((u) => (
+                                <a key={u} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
+                                  📎 קובץ
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                      {sub.driveFolderUrl?.trim() ? (
+                        <a href={sub.driveFolderUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
+                          פתח תיקיית Drive
+                        </a>
+                      ) : null}
+                    </article>
+                  ))
+                )}
               </div>
             )}
             {oppDetailTab === "whatsapp" && (

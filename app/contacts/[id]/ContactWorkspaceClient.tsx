@@ -40,6 +40,18 @@ type TaskItem = {
   syncToGoogleCalendar?: boolean;
   googleCalendarId?: string;
 };
+type JotformSubmissionItem = {
+  id: string;
+  submissionId: string;
+  formId: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  driveFolderUrl?: string;
+  submittedAt: string;
+  answers: Array<{ questionId: string; label: string; type: string; value: string; fileUrls: string[] }>;
+  files: Array<{ label: string; url: string }>;
+};
 
 type LeadPayload = {
   id: string;
@@ -189,6 +201,8 @@ export default function ContactWorkspaceClient({ contactId, viewerEmail }: Conta
   const [aggregatedTasks, setAggregatedTasks] = useState<TaskItem[]>([]);
   const [adminUsers, setAdminUsers] = useState<Array<{ email: string; name?: string }>>([]);
   const [customFieldsDef, setCustomFieldsDef] = useState<ContactCustomFieldDef[]>([]);
+  const [centerTab, setCenterTab] = useState<"timeline" | "jotform">("timeline");
+  const [jotformSubmissions, setJotformSubmissions] = useState<JotformSubmissionItem[]>([]);
   const [saving, setSaving] = useState(false);
 
   const [newNoteText, setNewNoteText] = useState("");
@@ -213,10 +227,16 @@ export default function ContactWorkspaceClient({ contactId, viewerEmail }: Conta
     setErr(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/contacts/${encodeURIComponent(contactId)}`, {
-        credentials: "include",
-        cache: "no-store",
-      });
+      const [res, jotRes] = await Promise.all([
+        fetch(`/api/contacts/${encodeURIComponent(contactId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        }),
+        fetch(`/api/jotform/submissions?contactId=${encodeURIComponent(contactId)}`, {
+          credentials: "include",
+          cache: "no-store",
+        }).catch(() => null),
+      ]);
       const j = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         error?: string;
@@ -228,6 +248,15 @@ export default function ContactWorkspaceClient({ contactId, viewerEmail }: Conta
       setLead(j.lead);
       setOpportunities(j.opportunities ?? []);
       setAggregatedTasks(j.aggregatedTasks ?? []);
+      if (jotRes) {
+        const jj = (await jotRes.json().catch(() => ({}))) as {
+          ok?: boolean;
+          submissions?: JotformSubmissionItem[];
+        };
+        setJotformSubmissions(jotRes.ok && jj.ok ? (jj.submissions ?? []) : []);
+      } else {
+        setJotformSubmissions([]);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "טעינה נכשלה");
       setLead(null);
@@ -612,7 +641,24 @@ export default function ContactWorkspaceClient({ contactId, viewerEmail }: Conta
             gap: 12,
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 900 }}>היסטוריית לקוח / הערות</h2>
+          <div style={{ display: "inline-flex", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+            <button
+              type="button"
+              onClick={() => setCenterTab("timeline")}
+              style={{ border: "none", background: centerTab === "timeline" ? "#ede9fe" : "#fff", padding: "8px 10px", cursor: "pointer", fontWeight: 800 }}
+            >
+              היסטוריית לקוח / הערות
+            </button>
+            <button
+              type="button"
+              onClick={() => setCenterTab("jotform")}
+              style={{ border: "none", background: centerTab === "jotform" ? "#ede9fe" : "#fff", padding: "8px 10px", cursor: "pointer", fontWeight: 800 }}
+            >
+              שאלון Jotform
+            </button>
+          </div>
+          {centerTab === "timeline" ? (
+          <>
           <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", gap: 10, maxHeight: "min(58vh, 640px)" }}>
             {timeline.length === 0 ? (
               <div style={{ color: "#9ca3af", fontWeight: 600, fontSize: 13 }}>אין הערות עדיין</div>
@@ -764,6 +810,47 @@ export default function ContactWorkspaceClient({ contactId, viewerEmail }: Conta
               </button>
             </div>
           </div>
+          </>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {jotformSubmissions.length === 0 ? (
+                <div style={{ color: "#9ca3af", fontWeight: 600, fontSize: 13 }}>
+                  אין שאלונים שנקלטו לאיש קשר זה עדיין
+                </div>
+              ) : (
+                jotformSubmissions.map((sub) => (
+                  <article key={sub.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fafafa", display: "grid", gap: 8 }}>
+                    <div style={{ fontSize: 12, color: "#6b7280", display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      <span>טופס: {sub.formId || "—"}</span>
+                      <span>הגשה: {formatIsraelDateTime(sub.submittedAt)}</span>
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {sub.answers.map((ans) => (
+                        <div key={`${sub.id}-${ans.questionId}`} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: "8px 10px", background: "#fff" }}>
+                          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{ans.label || ans.questionId}</div>
+                          {ans.value?.trim() ? <div style={{ whiteSpace: "pre-wrap" }}>{ans.value}</div> : null}
+                          {ans.fileUrls?.length ? (
+                            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                              {ans.fileUrls.map((u) => (
+                                <a key={u} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
+                                  📎 קובץ
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                    {sub.driveFolderUrl?.trim() ? (
+                      <a href={sub.driveFolderUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
+                        פתח תיקיית Drive
+                      </a>
+                    ) : null}
+                  </article>
+                ))
+              )}
+            </div>
+          )}
         </section>
 
         {/* Right — משימות פתוחות */}
