@@ -30,6 +30,39 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error } satisfies ApiErr, { status: auth.status });
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const tasks = Array.isArray(body.tasks)
+      ? body.tasks
+          .filter((x) => x && typeof x === "object")
+          .map((x) => {
+            const t = x as Record<string, unknown>;
+            const status: "todo" | "in_progress" | "done" | undefined =
+              t.status === "todo" || t.status === "in_progress" || t.status === "done"
+                ? t.status
+                : undefined;
+            return {
+              id: String(t.id ?? "").trim(),
+              title: String(t.title ?? "").trim(),
+              dueAt: String(t.dueAt ?? "").trim(),
+              reminderAt: typeof t.reminderAt === "string" ? t.reminderAt : undefined,
+              done: Boolean(t.done),
+              status,
+              comments: Array.isArray(t.comments)
+                ? t.comments
+                    .filter((c) => c && typeof c === "object")
+                    .map((c) => {
+                      const cc = c as Record<string, unknown>;
+                      return {
+                        id: String(cc.id ?? "").trim(),
+                        text: String(cc.text ?? ""),
+                        createdAt: String(cc.createdAt ?? ""),
+                      };
+                    })
+                : [],
+              createdAt: String(t.createdAt ?? ""),
+            };
+          })
+          .filter((t) => t.id && t.title)
+      : undefined;
     const deal = await createPropertyDeal({
       name: String(body.name ?? ""),
       pipelineId: typeof body.pipelineId === "string" ? body.pipelineId : undefined,
@@ -46,6 +79,7 @@ export async function POST(req: NextRequest) {
       businessPlanUrl: typeof body.businessPlanUrl === "string" ? body.businessPlanUrl : undefined,
       status: typeof body.status === "string" ? body.status : undefined,
       notes: typeof body.notes === "string" ? body.notes : undefined,
+      tasks,
     });
     return NextResponse.json({ ok: true, deal });
   } catch (e) {

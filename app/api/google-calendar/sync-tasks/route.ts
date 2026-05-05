@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
     const db = await getAdminDb();
     for (const t of toSync) {
       try {
+        if (t.entityType === "deal") continue;
         const col = t.entityType === "contact" ? "leads" : "opportunities";
         const ref = db.collection(col).doc(t.entityId);
         const snap = await ref.get();

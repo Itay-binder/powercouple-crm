@@ -56,6 +56,15 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
     void loadPipelines();
   }, []);
 
+  useEffect(() => {
+    if (!createOpen) return;
+    if (draftPipeId.trim()) return;
+    const first = pipelines[0];
+    if (!first) return;
+    setDraftPipeId(first.id);
+    setDraftStage(first.stages[0] ?? "");
+  }, [createOpen, draftPipeId, pipelines]);
+
   const stagesForDraft = useMemo(() => {
     const p = pipelines.find((x) => x.id === draftPipeId);
     return p?.stages ?? [];
@@ -76,10 +85,11 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
     setErr(null);
     try {
       const body: Record<string, unknown> = { name, status: "בהתאמה" };
-      const pid = draftPipeId.trim();
+      const pid = draftPipeId.trim() || pipelines[0]?.id?.trim() || "";
       if (pid) {
         body.pipelineId = pid;
-        const st = draftStage.trim() || stagesForDraft[0];
+        const stages = pipelines.find((x) => x.id === pid)?.stages ?? stagesForDraft;
+        const st = draftStage.trim() || stages[0];
         if (st) body.pipelineStage = st;
       }
       const res = await fetch("/api/deals", {
@@ -92,8 +102,9 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
       if (!res.ok || !j.ok) throw new Error(j.error ?? "יצירה נכשלה");
       setCreateOpen(false);
       setDraftName("");
-      setDraftPipeId("");
-      setDraftStage("");
+      const first = pipelines[0];
+      setDraftPipeId(first?.id ?? "");
+      setDraftStage(first?.stages?.[0] ?? "");
       onRefresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "שגיאה");
@@ -190,7 +201,7 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
             placeholder="שם העסקה"
             style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 10 }}
           />
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>פייפליין (אופציונלי)</div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>פייפליין</div>
           <select
             value={draftPipeId}
             onChange={(e) => {
@@ -201,7 +212,6 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
             }}
             style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 10 }}
           >
-            <option value="">— ללא —</option>
             {pipelines.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

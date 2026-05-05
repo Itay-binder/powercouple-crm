@@ -46,7 +46,7 @@ export async function PATCH(req: NextRequest) {
   }
   try {
     const body = (await req.json()) as {
-      entityType?: "contact" | "opportunity";
+      entityType?: "contact" | "opportunity" | "deal";
       entityId?: string;
       taskId?: string;
       status?: TaskStatus;

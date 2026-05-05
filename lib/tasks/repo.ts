@@ -14,7 +14,7 @@ export type UnifiedTask = {
   done: boolean;
   comments: TaskComment[];
   assignedRep?: string;
-  entityType: "contact" | "opportunity";
+  entityType: "contact" | "opportunity" | "deal";
   entityId: string;
   entityName: string;
   /** טלפון איש קשר (לחיוג מהיר) */
@@ -80,9 +80,10 @@ function normalizeTask(raw: RawTask): UnifiedTask | null {
 
 export async function listUnifiedTasks(): Promise<UnifiedTask[]> {
   const db = await getAdminDb();
-  const [leadsSnap, oppSnap, pipelinesSnap] = await Promise.all([
+  const [leadsSnap, oppSnap, dealsSnap, pipelinesSnap] = await Promise.all([
     db.collection("leads").get(),
     db.collection("opportunities").get(),
+    db.collection("property_deals").get(),
     db.collection("pipelines").get(),
   ]);
 
@@ -128,6 +129,24 @@ export async function listUnifiedTasks(): Promise<UnifiedTask[]> {
       });
     }
   }
+  for (const doc of dealsSnap.docs) {
+    const d = (doc.data() ?? {}) as Record<string, unknown>;
+    const tasks = Array.isArray(d.tasks) ? (d.tasks as RawTask[]) : [];
+    for (const t of tasks) {
+      const normalized = normalizeTask(t);
+      if (!normalized) continue;
+      out.push({
+        ...normalized,
+        assignedRep: typeof d.assignedRep === "string" ? d.assignedRep : undefined,
+        entityType: "deal",
+        entityId: doc.id,
+        entityName: (typeof d.name === "string" && d.name) || doc.id,
+        pipelineId: String(d.pipelineId ?? "").trim() || "__property_deal__",
+        pipelineName:
+          pipelineNameById.get(String(d.pipelineId ?? "").trim()) || "עסקאות נדל\"ן",
+      });
+    }
+  }
   return out.sort((a, b) => {
     const as = a.createdAt || "";
     const bs = b.createdAt || "";
@@ -137,7 +156,7 @@ export async function listUnifiedTasks(): Promise<UnifiedTask[]> {
 
 export async function updateTaskAndSync(
   input: {
-    entityType: "contact" | "opportunity";
+    entityType: "contact" | "opportunity" | "deal";
     entityId: string;
     taskId: string;
     status?: TaskStatus;
@@ -150,7 +169,12 @@ export async function updateTaskAndSync(
   }
 ): Promise<UnifiedTask> {
   const db = await getAdminDb();
-  const col = input.entityType === "contact" ? "leads" : "opportunities";
+  const col =
+    input.entityType === "contact"
+      ? "leads"
+      : input.entityType === "opportunity"
+        ? "opportunities"
+        : "property_deals";
   const ref = db.collection(col).doc(input.entityId);
   const snap = await ref.get();
   if (!snap.exists) throw new Error("Entity not found");
@@ -215,7 +239,7 @@ export async function updateTaskAndSync(
     prevTasksForCal as RawTaskIn[],
     [nextTask as RawTaskIn],
     {
-      entityType: input.entityType,
+      entityType: input.entityType === "deal" ? "opportunity" : input.entityType,
       entityId: input.entityId,
       entityLabel: String(entityLabel),
     }
@@ -240,13 +264,21 @@ export async function updateTaskAndSync(
     { merge: true }
   );
 
-  // If this task belongs to an opportunity, also sync the documentation note to its contact.
-  if (input.entityType === "opportunity" && trimmedComment) {
+  // If this task belongs to an opportunity or a deal, also sync documentation to linked contacts.
+  if ((input.entityType === "opportunity" || input.entityType === "deal") && trimmedComment) {
     const oppContactId = String(data.contactId ?? "").trim();
-    if (oppContactId) {
-      const contactRef = db.collection("leads").doc(oppContactId);
-      const contactSnap = await contactRef.get();
-      if (contactSnap.exists) {
+    const linked =
+      input.entityType === "opportunity"
+        ? [oppContactId]
+        : Array.isArray(data.linkedContactIds)
+          ? data.linkedContactIds.map((x) => String(x).trim()).filter(Boolean)
+          : [];
+    await Promise.all(
+      linked.map(async (cid) => {
+        if (!cid) return;
+        const contactRef = db.collection("leads").doc(cid);
+        const contactSnap = await contactRef.get();
+        if (!contactSnap.exists) return;
         const contactData = (contactSnap.data() ?? {}) as Record<string, unknown>;
         const contactNotes = Array.isArray(contactData.notes)
           ? [...(contactData.notes as Array<{ id: string; text: string; createdAt: string }>)]
@@ -263,8 +295,8 @@ export async function updateTaskAndSync(
           },
           { merge: true }
         );
-      }
-    }
+      })
+    );
   }
 
   const entityName =
@@ -284,7 +316,7 @@ export async function updateTaskAndSync(
       : (typeof data.contactPhone === "string" && data.contactPhone.trim()) ||
         (typeof data.phone === "string" && data.phone.trim()) ||
         undefined;
-  if (input.entityType === "opportunity") {
+  if (input.entityType === "opportunity" || input.entityType === "deal") {
     pipelineId = String(data.pipelineId ?? "").trim() || "__unknown_pipeline__";
     const pSnap = await db.collection("pipelines").doc(pipelineId).get();
     pipelineName = pSnap.exists

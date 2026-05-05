@@ -19,6 +19,16 @@ type Deal = {
   businessPlanUrl?: string;
   status?: string;
   notes?: string;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    dueAt: string;
+    reminderAt?: string;
+    done: boolean;
+    status?: "todo" | "in_progress" | "done";
+    comments?: Array<{ id: string; text: string; createdAt: string }>;
+    createdAt: string;
+  }>;
 };
 
 type Pipeline = { id: string; name: string; stages: string[] };
@@ -30,6 +40,10 @@ export default function DealDetailClient({ id }: { id: string }) {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDueAt, setTaskDueAt] = useState("");
+  const [taskStatus, setTaskStatus] = useState<"todo" | "in_progress" | "done">("todo");
+  const [taskComment, setTaskComment] = useState<Record<string, string>>({});
 
   const [draft, setDraft] = useState<Partial<Deal>>({});
 
@@ -94,7 +108,14 @@ export default function DealDetailClient({ id }: { id: string }) {
     };
   }, []);
 
-  async function save() {
+  function appendDealNote(base: string | undefined, text: string): string {
+    const prefix = `[${new Date().toLocaleString("he-IL")}]`;
+    const next = `${prefix} ${text}`.trim();
+    const prev = (base ?? "").trim();
+    return prev ? `${prev}\n${next}` : next;
+  }
+
+  async function save(nextDraft: Partial<Deal> = draft) {
     if (!deal) return;
     setSaving(true);
     setErr(null);
@@ -104,19 +125,20 @@ export default function DealDetailClient({ id }: { id: string }) {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: draft.name,
-          pipelineId: draft.pipelineId?.trim() ?? "",
-          pipelineStage: draft.pipelineStage?.trim() ?? "",
-          clientCount: draft.clientCount,
-          dealType: draft.dealType,
-          city: draft.city,
-          fullAddress: draft.fullAddress,
-          linkedContactIds: draft.linkedContactIds,
-          saleAgreementUrl: draft.saleAgreementUrl,
-          driveFolderUrl: draft.driveFolderUrl,
-          businessPlanUrl: draft.businessPlanUrl,
-          status: draft.status,
-          notes: draft.notes,
+          name: nextDraft.name,
+          pipelineId: nextDraft.pipelineId?.trim() ?? "",
+          pipelineStage: nextDraft.pipelineStage?.trim() ?? "",
+          clientCount: nextDraft.clientCount,
+          dealType: nextDraft.dealType,
+          city: nextDraft.city,
+          fullAddress: nextDraft.fullAddress,
+          linkedContactIds: nextDraft.linkedContactIds,
+          saleAgreementUrl: nextDraft.saleAgreementUrl,
+          driveFolderUrl: nextDraft.driveFolderUrl,
+          businessPlanUrl: nextDraft.businessPlanUrl,
+          status: nextDraft.status,
+          notes: nextDraft.notes,
+          tasks: nextDraft.tasks ?? [],
         }),
       });
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; deal?: Deal; error?: string };
@@ -128,6 +150,56 @@ export default function DealDetailClient({ id }: { id: string }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function createTask() {
+    const title = taskTitle.trim();
+    if (!title) return;
+    const nextTasks = [
+      ...(draft.tasks ?? []),
+      {
+        id: crypto.randomUUID(),
+        title,
+        dueAt: taskDueAt.trim(),
+        done: taskStatus === "done",
+        status: taskStatus,
+        comments: [],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const nextDraft: Partial<Deal> = {
+      ...draft,
+      tasks: nextTasks,
+      notes: appendDealNote(draft.notes, `נפתחה משימה: ${title}`),
+    };
+    setDraft(nextDraft);
+    await save(nextDraft);
+    setTaskTitle("");
+    setTaskDueAt("");
+    setTaskStatus("todo");
+  }
+
+  async function addTaskComment(taskId: string) {
+    const text = (taskComment[taskId] ?? "").trim();
+    if (!text) return;
+    const nextTasks =
+      draft.tasks?.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              comments: [...(t.comments ?? []), { id: crypto.randomUUID(), text, createdAt: new Date().toISOString() }],
+            }
+          : t
+      ) ?? [];
+    const title = nextTasks.find((t) => t.id === taskId)?.title ?? "משימה";
+    const nextDraft: Partial<Deal> = {
+      ...draft,
+      tasks: nextTasks,
+      notes: appendDealNote(draft.notes, `תיעוד משימה (${title}): ${text}`),
+    };
+    setDraft(nextDraft);
+    await save(nextDraft);
+    setTaskComment((m) => ({ ...m, [taskId]: "" }));
   }
 
   if (!deal && !err) {
@@ -332,6 +404,74 @@ export default function DealDetailClient({ id }: { id: string }) {
             rows={5}
             style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", fontFamily: "inherit" }}
           />
+        </section>
+
+        <section style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: 16 }}>
+          <div style={{ fontWeight: 900, marginBottom: 12 }}>משימות עסקה</div>
+          <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+            <input
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(e.target.value)}
+              placeholder="כותרת משימה"
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            />
+            <input
+              type="datetime-local"
+              value={taskDueAt}
+              onChange={(e) => setTaskDueAt(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            />
+            <select
+              value={taskStatus}
+              onChange={(e) => setTaskStatus(e.target.value as "todo" | "in_progress" | "done")}
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            >
+              <option value="todo">לביצוע</option>
+              <option value="in_progress">בתהליך</option>
+              <option value="done">בוצע</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void createTask()}
+              disabled={saving || !taskTitle.trim()}
+              style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+            >
+              + הוסף משימה לעסקה
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            {(draft.tasks ?? []).map((t) => (
+              <div key={t.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10 }}>
+                <div style={{ fontWeight: 800 }}>{t.title}</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  סטטוס: {t.status ?? (t.done ? "done" : "todo")} · דדליין: {t.dueAt || "—"}
+                </div>
+                <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                  {(t.comments ?? []).map((c) => (
+                    <div key={c.id} style={{ fontSize: 12, background: "#fafafa", padding: "6px 8px", borderRadius: 8 }}>
+                      {c.text}
+                    </div>
+                  ))}
+                  <textarea
+                    value={taskComment[t.id] ?? ""}
+                    onChange={(e) => setTaskComment((m) => ({ ...m, [t.id]: e.target.value }))}
+                    placeholder="תיעוד למשימה"
+                    rows={2}
+                    style={{ width: "100%", padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", fontFamily: "inherit" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addTaskComment(t.id)}
+                    disabled={saving || !(taskComment[t.id] ?? "").trim()}
+                    style={{ padding: "6px 10px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 700 }}
+                  >
+                    הוסף תיעוד
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </section>
 
         <div>

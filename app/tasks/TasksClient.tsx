@@ -20,7 +20,7 @@ type Task = {
   done: boolean;
   comments: TaskComment[];
   assignedRep?: string;
-  entityType: "contact" | "opportunity";
+  entityType: "contact" | "opportunity" | "deal";
   entityId: string;
   entityName: string;
   entityPhone?: string;
@@ -52,9 +52,9 @@ function fromLocalInput(v: string): string {
 }
 
 function entityHref(t: Task): string {
-  return t.entityType === "contact"
-    ? `/contacts/${encodeURIComponent(t.entityId)}`
-    : `/pipeline?openOpportunityId=${encodeURIComponent(t.entityId)}`;
+  if (t.entityType === "contact") return `/contacts/${encodeURIComponent(t.entityId)}`;
+  if (t.entityType === "deal") return `/deals/${encodeURIComponent(t.entityId)}`;
+  return `/pipeline?openOpportunityId=${encodeURIComponent(t.entityId)}`;
 }
 
 function taskRowKey(t: Task): string {
@@ -369,7 +369,7 @@ export default function TasksClient() {
         >
           <div style={{ fontWeight: 900, fontSize: 13 }}>{t.title}</div>
           <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-            {t.entityType === "contact" ? "איש קשר" : "לקוח"}:{" "}
+            {t.entityType === "contact" ? "איש קשר" : t.entityType === "deal" ? "עסקה" : "לקוח"}:{" "}
             <span
               role="link"
               tabIndex={0}
@@ -771,7 +771,7 @@ export default function TasksClient() {
                   textDecoration: "none",
                 }}
               >
-                {active.entityType === "contact" ? "פתח איש קשר" : "פתח לקוח"}
+                {active.entityType === "contact" ? "פתח איש קשר" : active.entityType === "deal" ? "פתח עסקה" : "פתח לקוח"}
               </a>
               <span style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>
                 {active.pipelineName}

@@ -19,6 +19,16 @@ export type PropertyDealRecord = {
   /** בהתאמה | נחתם | סיום רכישה | נמכר */
   status?: string;
   notes?: string;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    dueAt: string;
+    reminderAt?: string;
+    done: boolean;
+    status?: "todo" | "in_progress" | "done";
+    comments?: Array<{ id: string; text: string; createdAt: string }>;
+    createdAt: string;
+  }>;
   createdAt: Date | null;
   updatedAt: Date | null;
 };
@@ -58,9 +68,63 @@ function readDealDoc(id: string, d: Record<string, unknown>): PropertyDealRecord
     businessPlanUrl: typeof d.businessPlanUrl === "string" ? d.businessPlanUrl : undefined,
     status: typeof d.status === "string" ? d.status : undefined,
     notes: typeof d.notes === "string" ? d.notes : undefined,
+    tasks: Array.isArray(d.tasks)
+      ? (d.tasks as Array<{
+          id: string;
+          title: string;
+          dueAt: string;
+          reminderAt?: string;
+          done: boolean;
+          status?: "todo" | "in_progress" | "done";
+          comments?: Array<{ id: string; text: string; createdAt: string }>;
+          createdAt: string;
+        }>)
+      : undefined,
     createdAt: mapTs(d.createdAt),
     updatedAt: mapTs(d.updatedAt),
   };
+}
+
+async function syncDealNotesToLinkedContacts(input: {
+  linkedContactIds: string[];
+  noteText: string;
+  dealId: string;
+  dealName: string;
+}): Promise<void> {
+  const text = input.noteText.trim();
+  const contactIds = Array.from(new Set(input.linkedContactIds.map((x) => x.trim()).filter(Boolean)));
+  if (!text || contactIds.length === 0) return;
+  const db = await getAdminDb();
+  await Promise.all(
+    contactIds.map(async (cid) => {
+      const ref = db.collection("leads").doc(cid);
+      const snap = await ref.get();
+      if (!snap.exists) return;
+      const data = (snap.data() ?? {}) as Record<string, unknown>;
+      const prev = Array.isArray(data.notes)
+        ? (data.notes as Array<{ id: string; text: string; createdAt: string; createdBy?: string; category?: string }>)
+        : [];
+      const marker = `[Deal ${input.dealName || input.dealId}]`;
+      const nextText = `${marker} ${text}`.trim();
+      if (prev.some((n) => String(n.text ?? "").trim() === nextText)) return;
+      await ref.set(
+        {
+          notes: [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              text: nextText,
+              createdAt: new Date().toISOString(),
+              createdBy: "מערכת עסקאות",
+              category: "עסקאות נדל\"ן",
+            },
+          ],
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    })
+  );
 }
 
 export async function listPropertyDeals(): Promise<PropertyDealRecord[]> {
@@ -90,6 +154,16 @@ export type UpsertPropertyDealInput = {
   businessPlanUrl?: string;
   status?: string;
   notes?: string;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    dueAt: string;
+    reminderAt?: string;
+    done: boolean;
+    status?: "todo" | "in_progress" | "done";
+    comments?: Array<{ id: string; text: string; createdAt: string }>;
+    createdAt: string;
+  }>;
 };
 
 export async function createPropertyDeal(input: UpsertPropertyDealInput): Promise<PropertyDealRecord> {
@@ -113,11 +187,21 @@ export async function createPropertyDeal(input: UpsertPropertyDealInput): Promis
     businessPlanUrl: input.businessPlanUrl?.trim() ?? "",
     status: input.status?.trim() ?? "בהתאמה",
     notes: input.notes?.trim() ?? "",
+    tasks: input.tasks ?? [],
     createdAt: now,
     updatedAt: now,
   });
   const again = await ref.get();
-  return readDealDoc(ref.id, (again.data() ?? {}) as Record<string, unknown>);
+  const created = readDealDoc(ref.id, (again.data() ?? {}) as Record<string, unknown>);
+  if (created.notes?.trim()) {
+    await syncDealNotesToLinkedContacts({
+      linkedContactIds: created.linkedContactIds,
+      noteText: created.notes,
+      dealId: created.id,
+      dealName: created.name,
+    });
+  }
+  return created;
 }
 
 export async function updatePropertyDeal(
@@ -149,10 +233,20 @@ export async function updatePropertyDeal(
   if (patch.businessPlanUrl != null) payload.businessPlanUrl = patch.businessPlanUrl.trim();
   if (patch.status != null) payload.status = patch.status.trim();
   if (patch.notes != null) payload.notes = patch.notes.trim();
+  if (patch.tasks != null) payload.tasks = patch.tasks;
 
   await ref.set(payload, { merge: true });
   const again = await ref.get();
-  return readDealDoc(id, (again.data() ?? {}) as Record<string, unknown>);
+  const updated = readDealDoc(id, (again.data() ?? {}) as Record<string, unknown>);
+  if (patch.notes !== undefined) {
+    await syncDealNotesToLinkedContacts({
+      linkedContactIds: updated.linkedContactIds,
+      noteText: updated.notes ?? "",
+      dealId: updated.id,
+      dealName: updated.name,
+    });
+  }
+  return updated;
 }
 
 /** חיפוש טקסטואלי פשוט (שם / עיר / כתובת) */
