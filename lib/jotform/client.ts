@@ -8,12 +8,27 @@ export type JotformQuestion = {
   options?: string[];
 };
 
+export type JotformForm = {
+  id: string;
+  title: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type JotformAnswer = {
   questionId: string;
   label: string;
   type: string;
   value: string;
   fileUrls: string[];
+};
+
+export type JotformSubmission = {
+  submissionId: string;
+  formId: string;
+  createdAt?: string;
+  status?: string;
+  answers: JotformAnswer[];
 };
 
 function normalizePrivateKey(raw: string): string {
@@ -64,6 +79,29 @@ export async function fetchJotformQuestions(apiKey: string, formId: string): Pro
       } satisfies JotformQuestion;
     })
     .filter((q) => q.id && q.text && q.type);
+}
+
+export async function fetchJotformForms(apiKey: string): Promise<JotformForm[]> {
+  const res = await fetch(
+    `https://api.jotform.com/user/forms?apiKey=${encodeURIComponent(apiKey)}&limit=1000`,
+    { cache: "no-store" }
+  );
+  const j = (await res.json().catch(() => ({}))) as {
+    responseCode?: number;
+    content?: Array<Record<string, unknown>>;
+    message?: string;
+  };
+  if (!res.ok || j.responseCode !== 200 || !Array.isArray(j.content)) {
+    throw new Error(j.message || "Failed to read Jotform forms");
+  }
+  return j.content
+    .map((f) => ({
+      id: String(f.id ?? "").trim(),
+      title: String(f.title ?? f.username ?? "").trim() || "Untitled Form",
+      createdAt: typeof f.created_at === "string" ? f.created_at : undefined,
+      updatedAt: typeof f.updated_at === "string" ? f.updated_at : undefined,
+    }))
+    .filter((f) => f.id);
 }
 
 function asText(v: unknown): string {
@@ -123,6 +161,54 @@ export async function fetchSubmissionAnswers(
       } satisfies JotformAnswer;
     })
     .filter((a) => a.questionId && (a.value || a.fileUrls.length > 0));
+}
+
+export async function fetchJotformSubmissions(
+  apiKey: string,
+  formId: string,
+  limit = 50
+): Promise<JotformSubmission[]> {
+  const res = await fetch(
+    `https://api.jotform.com/form/${encodeURIComponent(formId)}/submissions?apiKey=${encodeURIComponent(
+      apiKey
+    )}&limit=${Math.max(1, Math.min(200, limit))}`,
+    { cache: "no-store" }
+  );
+  const j = (await res.json().catch(() => ({}))) as {
+    responseCode?: number;
+    content?: Array<Record<string, unknown>>;
+    message?: string;
+  };
+  if (!res.ok || j.responseCode !== 200 || !Array.isArray(j.content)) {
+    throw new Error(j.message || "Failed to read Jotform submissions");
+  }
+
+  return j.content.map((s) => {
+    const answersObj =
+      s.answers && typeof s.answers === "object"
+        ? (s.answers as Record<string, Record<string, unknown>>)
+        : {};
+    const answers: JotformAnswer[] = Object.entries(answersObj)
+      .map(([qid, a]) => {
+        const ans = a.answer;
+        return {
+          questionId: qid,
+          label: String(a.text ?? "").trim(),
+          type: String(a.type ?? "").trim(),
+          value: asText(ans),
+          fileUrls: extractFileUrls(ans),
+        } satisfies JotformAnswer;
+      })
+      .filter((a) => a.questionId && (a.value || a.fileUrls.length > 0));
+
+    return {
+      submissionId: String(s.id ?? "").trim(),
+      formId,
+      createdAt: typeof s.created_at === "string" ? s.created_at : undefined,
+      status: typeof s.status === "string" ? s.status : undefined,
+      answers,
+    } satisfies JotformSubmission;
+  });
 }
 
 export async function createDriveFolderAndUploadFiles(input: {

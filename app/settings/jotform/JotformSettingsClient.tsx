@@ -29,6 +29,19 @@ type SubmissionRow = {
   submittedAt: string;
   answers: Array<{ questionId: string; label: string; type: string; value: string; fileUrls: string[] }>;
 };
+type JotformFormRow = {
+  id: string;
+  title: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+type LiveSubmissionRow = {
+  submissionId: string;
+  formId: string;
+  createdAt?: string;
+  status?: string;
+  answers: Array<{ questionId: string; label: string; type: string; value: string; fileUrls: string[] }>;
+};
 
 export default function JotformSettingsClient({ baseUrl, showMovingOrders }: Props) {
   const [loading, setLoading] = useState(true);
@@ -39,6 +52,11 @@ export default function JotformSettingsClient({ baseUrl, showMovingOrders }: Pro
   const [cfg, setCfg] = useState<Cfg | null>(null);
   const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
+  const [forms, setForms] = useState<JotformFormRow[]>([]);
+  const [formsLoading, setFormsLoading] = useState(false);
+  const [selectedFormId, setSelectedFormId] = useState("");
+  const [liveSubmissions, setLiveSubmissions] = useState<LiveSubmissionRow[]>([]);
+  const [liveLoading, setLiveLoading] = useState(false);
 
   const [enabled, setEnabled] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -56,6 +74,7 @@ export default function JotformSettingsClient({ baseUrl, showMovingOrders }: Pro
       setCfg(j.config);
       setEnabled(j.config.enabled);
       setFormIdOrUrl(j.config.formUrl || j.config.formId || "");
+      setSelectedFormId(j.config.formId || "");
       setDriveFolder(j.config.driveParentFolderId || "");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "טעינה נכשלה");
@@ -87,6 +106,56 @@ export default function JotformSettingsClient({ baseUrl, showMovingOrders }: Pro
   useEffect(() => {
     void loadSubmissions();
   }, [loadSubmissions]);
+
+  const loadForms = useCallback(async () => {
+    setFormsLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/settings/jotform/forms", { credentials: "include", cache: "no-store" });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        forms?: JotformFormRow[];
+        error?: string;
+      };
+      if (!res.ok || !j.ok) throw new Error(j.error ?? "טעינת שאלונים נכשלה");
+      const items = j.forms ?? [];
+      setForms(items);
+      if (!selectedFormId && items[0]?.id) {
+        setSelectedFormId(items[0].id);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "טעינת שאלונים נכשלה");
+      setForms([]);
+    } finally {
+      setFormsLoading(false);
+    }
+  }, [selectedFormId]);
+
+  const loadLiveSubmissions = useCallback(async () => {
+    setLiveLoading(true);
+    setErr(null);
+    try {
+      const q = selectedFormId.trim()
+        ? `?formId=${encodeURIComponent(selectedFormId.trim())}`
+        : "";
+      const res = await fetch(`/api/settings/jotform/live-submissions${q}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        submissions?: LiveSubmissionRow[];
+        error?: string;
+      };
+      if (!res.ok || !j.ok) throw new Error(j.error ?? "טעינת הגשות מ-Jotform נכשלה");
+      setLiveSubmissions(j.submissions ?? []);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "טעינת הגשות מ-Jotform נכשלה");
+      setLiveSubmissions([]);
+    } finally {
+      setLiveLoading(false);
+    }
+  }, [selectedFormId]);
 
   const webhookUrl = useMemo(() => {
     const token = cfg?.webhookToken?.trim() || "";
@@ -204,7 +273,90 @@ export default function JotformSettingsClient({ baseUrl, showMovingOrders }: Pro
 
         <div style={{ marginTop: 14, borderTop: "1px solid #f3f4f6", paddingTop: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <div style={{ fontWeight: 800 }}>הגשות אחרונות לשאלון המוגדר</div>
+            <div style={{ fontWeight: 800 }}>חיבור לחשבון Jotform (דרך API Key)</div>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={() => void loadForms()}
+              disabled={formsLoading}
+              style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: "7px 10px", background: "#fff", fontWeight: 700, cursor: "pointer" }}
+            >
+              {formsLoading ? "טוען…" : "טען שאלונים מהחשבון"}
+            </button>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <select
+              value={selectedFormId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedFormId(id);
+                setFormIdOrUrl(id);
+              }}
+              style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            >
+              <option value="">בחר שאלון</option>
+              {forms.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title} ({f.id})
+                </option>
+              ))}
+            </select>
+            <div style={{ color: "#6b7280", fontSize: 12 }}>
+              אחרי בחירה לחצי "שמור הגדרות" כדי לקבוע שזה השאלון הפעיל לסנכרון אוטומטי.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14, borderTop: "1px solid #f3f4f6", paddingTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontWeight: 800 }}>הגשות ישירות מ־Jotform (כמו בממשק שלהם)</div>
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={() => void loadLiveSubmissions()}
+              disabled={liveLoading}
+              style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: "7px 10px", background: "#fff", fontWeight: 700, cursor: "pointer" }}
+            >
+              {liveLoading ? "מרענן…" : "משוך הגשות מהחשבון"}
+            </button>
+          </div>
+          {liveLoading ? <div style={{ color: "#6b7280", fontSize: 13 }}>טוען מ־Jotform…</div> : null}
+          {!liveLoading && liveSubmissions.length === 0 ? (
+            <div style={{ color: "#9ca3af", fontSize: 13 }}>
+              אין הגשות כרגע מהחשבון לשאלון הזה.
+            </div>
+          ) : null}
+          <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            {liveSubmissions.map((s) => (
+              <article key={`${s.formId}-${s.submissionId}`} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff", display: "grid", gap: 8 }}>
+                <div style={{ fontSize: 12, color: "#6b7280", display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <span>Submission: {s.submissionId}</span>
+                  <span>הוגש: {s.createdAt ? new Date(s.createdAt).toLocaleString("he-IL") : "—"}</span>
+                  <span>סטטוס: {s.status || "—"}</span>
+                </div>
+                {s.answers.map((a) => (
+                  <div key={`${s.submissionId}-${a.questionId}`} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: "8px 10px", background: "#fafafa" }}>
+                    <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{a.label || a.questionId}</div>
+                    {a.value?.trim() ? <div style={{ whiteSpace: "pre-wrap" }}>{a.value}</div> : null}
+                    {a.fileUrls?.length ? (
+                      <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {a.fileUrls.map((u) => (
+                          <a key={u} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
+                            📎 קובץ
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginTop: 14, borderTop: "1px solid #f3f4f6", paddingTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontWeight: 800 }}>הגשות שנקלטו ב־CRM (דרך webhook)</div>
             <div style={{ flex: 1 }} />
             <button
               type="button"
