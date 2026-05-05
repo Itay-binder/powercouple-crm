@@ -8,11 +8,24 @@ export type BoardDeal = {
   name: string;
   pipelineId?: string;
   pipelineStage?: string;
+  clientCount?: number;
   dealType?: string;
   city?: string;
   fullAddress?: string;
   linkedContactIds: string[];
   status?: string;
+  saleAgreementUrl?: string;
+  driveFolderUrl?: string;
+  businessPlanUrl?: string;
+  notes?: string;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    dueAt: string;
+    done: boolean;
+    status?: "todo" | "in_progress" | "done";
+    createdAt: string;
+  }>;
 };
 
 type Pipeline = { id: string; name: string; stages: string[] };
@@ -252,10 +265,26 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
 
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 960, borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", minWidth: 2100, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f8fafc" }}>
-                {["שם העסקה", "פייפליין", "שלב", "סטטוס מכירה", "עיר", "לקוחות", "פעולות"].map((h) => (
+                {[
+                  "שם העסקה",
+                  "פייפליין",
+                  "שלב",
+                  "סטטוס מכירה",
+                  "סוג עסקה",
+                  "עיר",
+                  "כתובת מלאה",
+                  "כמות לקוחות",
+                  "לקוחות משויכים",
+                  "הסכם מכר",
+                  "תיקיית דרייב",
+                  "תכנית עסקית",
+                  "הערות",
+                  "משימות",
+                  "פעולות",
+                ].map((h) => (
                   <th key={h} style={{ textAlign: "right", padding: "12px 14px", fontSize: 12, fontWeight: 900, borderBottom: "2px solid #e5e7eb" }}>
                     {h}
                   </th>
@@ -265,13 +294,13 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 20, color: "#6b7280" }}>
+                  <td colSpan={15} style={{ padding: 20, color: "#6b7280" }}>
                     טוען…
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 20, color: "#6b7280" }}>
+                  <td colSpan={15} style={{ padding: 20, color: "#6b7280" }}>
                     אין עסקאות בתצוגה זו.
                   </td>
                 </tr>
@@ -286,8 +315,44 @@ export default function DealsBoardTab({ deals, loading, onRefresh }: Props) {
                     <td style={{ padding: "12px 14px" }}>{d.pipelineId ? pipeNameById.get(d.pipelineId) ?? "—" : "—"}</td>
                     <td style={{ padding: "12px 14px" }}>{d.pipelineStage ?? "—"}</td>
                     <td style={{ padding: "12px 14px" }}>{d.status ?? "—"}</td>
+                    <td style={{ padding: "12px 14px" }}>{d.dealType ?? "—"}</td>
                     <td style={{ padding: "12px 14px" }}>{d.city ?? "—"}</td>
+                    <td style={{ padding: "12px 14px", maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={d.fullAddress ?? ""}>
+                      {d.fullAddress ?? "—"}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>{typeof d.clientCount === "number" ? d.clientCount : "—"}</td>
                     <td style={{ padding: "12px 14px" }}>{d.linkedContactIds?.length ?? 0}</td>
+                    <td style={{ padding: "12px 14px" }}>
+                      {d.saleAgreementUrl ? (
+                        <a href={d.saleAgreementUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 700 }}>
+                          פתיחה
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      {d.driveFolderUrl ? (
+                        <a href={d.driveFolderUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 700 }}>
+                          פתיחה
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>
+                      {d.businessPlanUrl ? (
+                        <a href={d.businessPlanUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 700 }}>
+                          פתיחה
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td style={{ padding: "12px 14px", maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={d.notes ?? ""}>
+                      {d.notes?.trim() ? d.notes : "—"}
+                    </td>
+                    <td style={{ padding: "12px 14px" }}>{d.tasks?.length ?? 0}</td>
                     <td style={{ padding: "12px 14px" }}>
                       <Link href={`/deals/${encodeURIComponent(d.id)}`} style={{ fontWeight: 700, color: "#2563eb" }}>
                         פתיחה
