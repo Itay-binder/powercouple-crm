@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { WebhookEventId, WebhookTriggerRow } from "@/lib/webhooks/triggersTypes";
-import { ALL_WEBHOOK_EVENTS, WEBHOOK_EVENT_LABELS } from "@/lib/webhooks/triggersTypes";
+import { SETTINGS_WEBHOOK_EVENTS, WEBHOOK_EVENT_LABELS } from "@/lib/webhooks/triggersTypes";
 
 export default function TriggersClient() {
   const [loading, setLoading] = useState(true);
@@ -39,7 +39,8 @@ export default function TriggersClient() {
         setErr(j.error ?? "שגיאה בטעינה");
         return;
       }
-      setRows(j.triggers ?? []);
+      const allowed = new Set<WebhookEventId>(SETTINGS_WEBHOOK_EVENTS);
+      setRows((j.triggers ?? []).filter((r) => allowed.has(r.event)));
     } catch {
       setErr("שגיאה בטעינה");
     } finally {
@@ -76,6 +77,41 @@ export default function TriggersClient() {
     }
   }
 
+  async function resetAll() {
+    const ok = window.confirm("לאפס את כל הטריגרים? כל הקישורים יימחקו וכל הטריגרים יכובו.");
+    if (!ok) return;
+    const next = SETTINGS_WEBHOOK_EVENTS.map((event) => {
+      const existing = rows.find((r) => r.event === event);
+      return {
+        id: existing?.id || `def-${event}`,
+        label: existing?.label?.trim() || WEBHOOK_EVENT_LABELS[event],
+        event,
+        enabled: false,
+        url: "",
+      } satisfies WebhookTriggerRow;
+    });
+    setRows(next);
+    setSaving(true);
+    setErr(null);
+    setOkMsg(null);
+    try {
+      const res = await fetch("/api/settings/webhooks", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ triggers: next }),
+      });
+      const j = (await res.json()) as { ok?: boolean; triggers?: WebhookTriggerRow[]; error?: string };
+      if (!res.ok || !j.ok) throw new Error(j.error ?? "איפוס נכשל");
+      setRows(j.triggers ?? next);
+      setOkMsg("כל הטריגרים אופסו בהצלחה.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "איפוס נכשל");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function addRow() {
     const id =
       typeof crypto !== "undefined" && crypto.randomUUID
@@ -107,10 +143,10 @@ export default function TriggersClient() {
         טריגרים ו־Webhooks
       </h1>
       <p style={{ margin: "0 0 20px", color: "#4b5563", lineHeight: 1.5 }}>
-        הגדר לאן נשלחים אירועי המערכת (Make, n8n, וכו׳). גוף הבקשה הוא JSON עם שדות{" "}
+        הגדר לאן נשלחים אירועי המערכת. גוף הבקשה הוא JSON עם שדות{" "}
         <code style={{ background: "#f3f4f6", padding: "2px 6px", borderRadius: 6 }}>event</code>,{" "}
         <code style={{ background: "#f3f4f6", padding: "2px 6px", borderRadius: 6 }}>sentAt</code> ונתוני
-        הקשר (משימה / ליד / לקוח בפייפליין). תזכורות משימות מסתנכרנות עם ה-cron (GitHub Actions כל 5 דק׳).
+        הקשר (משימה / איש קשר / לקוח). כברירת מחדל כל הטריגרים כבויים וללא כתובות וובהוק.
       </p>
 
       {loading ? (
@@ -197,7 +233,7 @@ export default function TriggersClient() {
                       onChange={(e) => patchRow(row.id, { event: e.target.value as WebhookEventId })}
                       style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #d1d5db", fontSize: 15 }}
                     >
-                      {ALL_WEBHOOK_EVENTS.map((ev) => (
+                      {SETTINGS_WEBHOOK_EVENTS.map((ev) => (
                         <option key={ev} value={ev}>
                           {WEBHOOK_EVENT_LABELS[ev]}
                         </option>
@@ -254,7 +290,7 @@ export default function TriggersClient() {
                           }
                           style={{ width: "100%", minWidth: 200, padding: 8, borderRadius: 8, border: "1px solid #d1d5db" }}
                         >
-                          {ALL_WEBHOOK_EVENTS.map((ev) => (
+                          {SETTINGS_WEBHOOK_EVENTS.map((ev) => (
                             <option key={ev} value={ev}>
                               {WEBHOOK_EVENT_LABELS[ev]}
                             </option>
@@ -307,6 +343,22 @@ export default function TriggersClient() {
               }}
             >
               + טריגר
+            </button>
+            <button
+              type="button"
+              onClick={() => void resetAll()}
+              disabled={saving || loading}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 10,
+                border: "1px solid #fecaca",
+                background: "#fff",
+                color: "#b91c1c",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              אפס הכל
             </button>
             <button
               type="button"

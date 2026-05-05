@@ -46,6 +46,17 @@ export const ALL_WEBHOOK_EVENTS: WebhookEventId[] = [
   "moving_order_match_cancel",
 ];
 
+/** אירועים שמנוהלים במסך ההגדרות במערכת הנוכחית (ללא הובלות). */
+export const SETTINGS_WEBHOOK_EVENTS: WebhookEventId[] = [
+  "task_reminder_custom",
+  "task_reminder_deadline_15m",
+  "lead_created",
+  "lead_stage_changed",
+  "opportunity_created",
+  "opportunity_stage_changed",
+  "opportunity_pipeline_changed",
+];
+
 /** כאשר אין טריגר מופעל לאירוע — שליחה לכתובת אלה (Make ברירת מחדל). */
 export const WEBHOOK_EVENT_DEFAULT_URLS: Partial<Record<WebhookEventId, string>> = {
   moving_order_match_send: "https://hook.us1.make.com/7ig76p1u6ycbq5au3smo14ufelkdyer3",

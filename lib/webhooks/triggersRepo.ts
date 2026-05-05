@@ -5,6 +5,7 @@ import { getRequestTenantDatabaseId } from "@/lib/firebase/admin";
 import { getTenantByDatabaseId } from "@/lib/tenant/config";
 import {
   ALL_WEBHOOK_EVENTS,
+  SETTINGS_WEBHOOK_EVENTS,
   WEBHOOK_EVENT_LABELS,
   type WebhookEventId,
   type WebhookTriggerRow,
@@ -16,163 +17,19 @@ const DOC_ID = "webhookTriggers";
 export type { WebhookEventId, WebhookTriggerRow };
 export { WEBHOOK_EVENT_LABELS, ALL_WEBHOOK_EVENTS };
 
-const DEFAULT_MAKE =
-  "https://hook.us1.make.com/y713jevs12gt2ge6uuh7j7180q3c6fey";
-
-function envBaseUrl(): string {
-  return process.env.CRM_TASK_WEBHOOK_URL?.trim() || DEFAULT_MAKE;
-}
-
 /** טננט hot-afik: אין טריגרים פעילים ואין URL — הלקוח יגדיר בעצמו. */
 export function buildBlankWebhookTriggers(): WebhookTriggerRow[] {
-  return [
-    {
-      id: "def-task-reminder-custom",
-      label: "תזכורת משימה (ברירת מחדל)",
-      event: "task_reminder_custom",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-task-deadline-15m",
-      label: "15 דק׳ לפני דדליין (ברירת מחדל)",
-      event: "task_reminder_deadline_15m",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-lead-created",
-      label: "קליטת ליד",
-      event: "lead_created",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-lead-stage",
-      label: "שינוי שלב איש קשר",
-      event: "lead_stage_changed",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-opp-created",
-      label: "הזדמנות חדשה",
-      event: "opportunity_created",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-opp-stage",
-      label: "שינוי שלב בהזדמנות",
-      event: "opportunity_stage_changed",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-opp-pipeline",
-      label: "מעבר הזדמנות בין פייפליינים",
-      event: "opportunity_pipeline_changed",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-moving-order-dispatch",
-      label: "שליחת הזמנת הובלה למובילים",
-      event: "moving_order_dispatch",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-moving-order-match-send",
-      label: "התאמת הזמנות — שליחה למובילים",
-      event: "moving_order_match_send",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-moving-order-match-cancel",
-      label: "התאמת הזמנות — דחייה",
-      event: "moving_order_match_cancel",
-      enabled: false,
-      url: "",
-    },
-  ];
+  return SETTINGS_WEBHOOK_EVENTS.map((event) => ({
+    id: `def-${event}`,
+    label: WEBHOOK_EVENT_LABELS[event],
+    event,
+    enabled: false,
+    url: "",
+  }));
 }
 
 export function buildDefaultTriggers(): WebhookTriggerRow[] {
-  const base = envBaseUrl();
-  return [
-    {
-      id: "def-task-reminder-custom",
-      label: "תזכורת משימה (ברירת מחדל)",
-      event: "task_reminder_custom",
-      enabled: true,
-      url: base,
-    },
-    {
-      id: "def-task-deadline-15m",
-      label: "15 דק׳ לפני דדליין (ברירת מחדל)",
-      event: "task_reminder_deadline_15m",
-      enabled: true,
-      url: base,
-    },
-    {
-      id: "def-lead-created",
-      label: "קליטת ליד",
-      event: "lead_created",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-lead-stage",
-      label: "שינוי שלב איש קשר",
-      event: "lead_stage_changed",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-opp-created",
-      label: "הזדמנות חדשה",
-      event: "opportunity_created",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-opp-stage",
-      label: "שינוי שלב בהזדמנות",
-      event: "opportunity_stage_changed",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-opp-pipeline",
-      label: "מעבר הזדמנות בין פייפליינים",
-      event: "opportunity_pipeline_changed",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-moving-order-dispatch",
-      label: "שליחת הזמנת הובלה למובילים",
-      event: "moving_order_dispatch",
-      enabled: false,
-      url: "",
-    },
-    {
-      id: "def-moving-order-match-send",
-      label: "התאמת הזמנות — שליחה למובילים",
-      event: "moving_order_match_send",
-      enabled: true,
-      url: "https://hook.us1.make.com/7ig76p1u6ycbq5au3smo14ufelkdyer3",
-    },
-    {
-      id: "def-moving-order-match-cancel",
-      label: "התאמת הזמנות — דחייה",
-      event: "moving_order_match_cancel",
-      enabled: true,
-      url: "https://hook.us1.make.com/jjbdvct4ygbx7ee6wixpiao6zrcglxql",
-    },
-  ];
+  return buildBlankWebhookTriggers();
 }
 
 function readFirestoreDatabaseId(db: Firestore): string | null {
@@ -240,13 +97,18 @@ export async function getWebhookTriggers(db: Firestore): Promise<WebhookTriggerR
   const databaseId = await resolveWebhookFirestoreDatabaseId(db);
   const useBlankDefaults = getTenantByDatabaseId(databaseId)?.id === "hot-afik";
   const snap = await db.collection(COLLECTION).doc(DOC_ID).get();
-  const rawData = snap.data() as { hotAfikTriggersResetV1?: boolean; triggers?: unknown } | undefined;
+  const rawData = snap.data() as {
+    hotAfikTriggersResetV1?: boolean;
+    crmTriggersResetV2?: boolean;
+    triggers?: unknown;
+  } | undefined;
 
-  if (useBlankDefaults && !rawData?.hotAfikTriggersResetV1) {
+  if (!rawData?.crmTriggersResetV2 || (useBlankDefaults && !rawData?.hotAfikTriggersResetV1)) {
     const blank = buildBlankWebhookTriggers();
     await db.collection(COLLECTION).doc(DOC_ID).set(
       {
         triggers: blank,
+        crmTriggersResetV2: true,
         hotAfikTriggersResetV1: true,
         updatedAt: FieldValue.serverTimestamp(),
       },
@@ -255,7 +117,7 @@ export async function getWebhookTriggers(db: Firestore): Promise<WebhookTriggerR
     return blank;
   }
 
-  const defaults = useBlankDefaults ? buildBlankWebhookTriggers() : buildDefaultTriggers();
+  const defaults = buildDefaultTriggers();
   if (!snap.exists) return defaults;
   const parsed = parseWebhookTriggers(snap.data());
   if (!parsed) return defaults;
