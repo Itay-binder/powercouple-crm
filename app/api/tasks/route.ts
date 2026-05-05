@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
 import {
+  createTaskAndSync,
   listUnifiedTasks,
   type TaskStatus,
   updateTaskAndSync,
@@ -72,6 +73,50 @@ export async function PATCH(req: NextRequest) {
       dueAt: body.dueAt,
       reminderAt: body.reminderAt,
       commentText: body.commentText,
+      syncToGoogleCalendar: body.syncToGoogleCalendar,
+      googleCalendarId: body.googleCalendarId,
+    });
+    return NextResponse.json({ ok: true, task });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Unknown error" } satisfies ApiErr,
+      { status: 400 }
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const auth = await requireApprovedUser(req);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error } satisfies ApiErr,
+      { status: auth.status }
+    );
+  }
+  try {
+    const body = (await req.json()) as {
+      entityType?: "contact" | "opportunity" | "deal";
+      entityId?: string;
+      title?: string;
+      dueAt?: string;
+      reminderAt?: string;
+      status?: TaskStatus;
+      syncToGoogleCalendar?: boolean;
+      googleCalendarId?: string;
+    };
+    const entityType = body.entityType;
+    const entityId = body.entityId?.trim();
+    const title = body.title?.trim();
+    if (!entityType || !entityId || !title) {
+      throw new Error("entityType, entityId and title are required");
+    }
+    const task = await createTaskAndSync({
+      entityType,
+      entityId,
+      title,
+      dueAt: body.dueAt,
+      reminderAt: body.reminderAt,
+      status: body.status,
       syncToGoogleCalendar: body.syncToGoogleCalendar,
       googleCalendarId: body.googleCalendarId,
     });

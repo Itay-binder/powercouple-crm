@@ -336,3 +336,87 @@ export async function updateTaskAndSync(
   };
 }
 
+export async function createTaskAndSync(input: {
+  entityType: "contact" | "opportunity" | "deal";
+  entityId: string;
+  title: string;
+  dueAt?: string;
+  reminderAt?: string;
+  status?: TaskStatus;
+  syncToGoogleCalendar?: boolean;
+  googleCalendarId?: string;
+}): Promise<UnifiedTask> {
+  const db = await getAdminDb();
+  const col =
+    input.entityType === "contact"
+      ? "leads"
+      : input.entityType === "opportunity"
+        ? "opportunities"
+        : "property_deals";
+  const ref = db.collection(col).doc(input.entityId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("Entity not found");
+  const data = (snap.data() ?? {}) as Record<string, unknown>;
+  const prevTasks = Array.isArray(data.tasks) ? ([...data.tasks] as RawTask[]) : [];
+  const status = input.status ?? "todo";
+  const nextTask: RawTask = {
+    id: crypto.randomUUID(),
+    title: input.title.trim(),
+    dueAt: String(input.dueAt ?? "").trim(),
+    reminderAt: String(input.reminderAt ?? "").trim() || undefined,
+    status,
+    done: status === "done",
+    comments: [],
+    createdAt: new Date().toISOString(),
+  };
+  if (input.syncToGoogleCalendar) nextTask.syncToGoogleCalendar = true;
+  if (input.googleCalendarId?.trim()) nextTask.googleCalendarId = input.googleCalendarId.trim();
+
+  const entityLabel =
+    (typeof data.name === "string" && data.name) ||
+    (typeof data.email === "string" && data.email) ||
+    input.entityId;
+  const reconciled = await reconcileTasksGoogleCalendar(
+    prevTasks as RawTaskIn[],
+    [nextTask as RawTaskIn],
+    {
+      entityType: input.entityType === "deal" ? "opportunity" : input.entityType,
+      entityId: input.entityId,
+      entityLabel: String(entityLabel),
+    }
+  );
+  const created = (reconciled[0] ?? nextTask) as RawTask;
+  const tasks = [...prevTasks, created];
+  await ref.set({ tasks, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+  const normalized = normalizeTask(created);
+  if (!normalized) throw new Error("Task became invalid");
+  let pipelineId = "__contact__";
+  let pipelineName = "אנשי קשר";
+  let entityPhone: string | undefined =
+    input.entityType === "contact"
+      ? typeof data.phone === "string"
+        ? data.phone
+        : undefined
+      : (typeof data.contactPhone === "string" && data.contactPhone.trim()) ||
+        (typeof data.phone === "string" && data.phone.trim()) ||
+        undefined;
+  if (input.entityType === "opportunity" || input.entityType === "deal") {
+    pipelineId = String(data.pipelineId ?? "").trim() || "__unknown_pipeline__";
+    const pSnap = await db.collection("pipelines").doc(pipelineId).get();
+    pipelineName = pSnap.exists
+      ? String((pSnap.data() as Record<string, unknown>).name ?? pipelineId)
+      : pipelineId;
+  }
+  return {
+    ...normalized,
+    assignedRep: typeof data.assignedRep === "string" ? data.assignedRep : undefined,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    entityName: String(entityLabel),
+    entityPhone,
+    pipelineId,
+    pipelineName,
+  };
+}
+

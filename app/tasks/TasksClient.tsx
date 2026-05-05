@@ -34,6 +34,7 @@ type Task = {
 type GCalOptTask = { id: string; summary?: string; primary?: boolean };
 
 type PipelineRow = { id: string; name: string; stages: string[] };
+type ContactOption = { id: string; name: string };
 
 type ViewMode = "pipeline" | "table";
 
@@ -118,6 +119,13 @@ export default function TasksClient() {
   const [gcalList, setGcalList] = useState<GCalOptTask[]>([]);
   const [calSync, setCalSync] = useState(false);
   const [calIdPick, setCalIdPick] = useState("primary");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDueLocal, setNewDueLocal] = useState("");
+  const [newReminderLocal, setNewReminderLocal] = useState("");
+  const [newContactId, setNewContactId] = useState("");
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (!active) {
@@ -216,6 +224,30 @@ export default function TasksClient() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/contacts", { credentials: "include", cache: "no-store" });
+        const j = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          rows?: Array<{ id?: string; name?: string; email?: string; phone?: string }>;
+        };
+        if (!res.ok || !j.ok || cancelled) return;
+        const rows = (j.rows ?? []).map((r) => ({
+          id: String(r.id ?? ""),
+          name: String(r.name ?? r.email ?? r.phone ?? r.id ?? ""),
+        }));
+        setContactOptions(rows.filter((x) => x.id));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const grouped = useMemo(() => {
@@ -332,6 +364,41 @@ export default function TasksClient() {
       cur && cur.id === task.id && cur.entityId === task.entityId ? j.task! : cur
     );
     return true;
+  }
+
+  async function createTaskFromBoard() {
+    const title = newTitle.trim();
+    const entityId = newContactId.trim();
+    if (!title || !entityId) return;
+    setCreating(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: "contact",
+          entityId,
+          title,
+          dueAt: newDueLocal.trim() ? fromLocalInput(newDueLocal) : "",
+          reminderAt: newReminderLocal.trim() ? fromLocalInput(newReminderLocal) : "",
+          status: "todo",
+        }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; task?: Task };
+      if (!res.ok || !j.ok || !j.task) throw new Error(j.error ?? "יצירת משימה נכשלה");
+      setTasks((arr) => [j.task!, ...arr]);
+      setCreateOpen(false);
+      setNewTitle("");
+      setNewDueLocal("");
+      setNewReminderLocal("");
+      setNewContactId("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "יצירת משימה נכשלה");
+    } finally {
+      setCreating(false);
+    }
   }
 
   function renderTaskCard(t: Task, opts?: { pipelineScope?: string }) {
@@ -464,7 +531,76 @@ export default function TasksClient() {
         >
           {`${tasks.length} סה"כ`}
         </span>
+        <button
+          type="button"
+          onClick={() => setCreateOpen((v) => !v)}
+          style={{
+            border: "none",
+            background: "linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%)",
+            color: "#fff",
+            borderRadius: 10,
+            padding: "8px 12px",
+            cursor: "pointer",
+            fontWeight: 800,
+          }}
+        >
+          + הוסף משימה
+        </button>
       </div>
+
+      {createOpen ? (
+        <div style={{ marginBottom: 12, border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+            <input
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="כותרת משימה"
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            />
+            <select
+              value={newContactId}
+              onChange={(e) => setNewContactId(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            >
+              <option value="">בחר לקוח</option>
+              {contactOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="datetime-local"
+              value={newDueLocal}
+              onChange={(e) => setNewDueLocal(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            />
+            <input
+              type="datetime-local"
+              value={newReminderLocal}
+              onChange={(e) => setNewReminderLocal(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+            />
+          </div>
+          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => void createTaskFromBoard()}
+              disabled={creating || !newTitle.trim() || !newContactId.trim()}
+              style={{ border: "none", background: "#6d28d9", color: "#fff", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontWeight: 800 }}
+            >
+              {creating ? "יוצר…" : "צור משימה"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreateOpen(false)}
+              style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}
+            >
+              ביטול
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {viewToggle}
 

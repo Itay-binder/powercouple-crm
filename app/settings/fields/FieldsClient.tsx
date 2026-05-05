@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type EntityType = "contact" | "opportunity" | "moving_order";
+type EntityType = "contact" | "opportunity" | "property_deal";
 type FieldType =
   | "text"
   | "number"
@@ -84,34 +84,30 @@ const OPPORTUNITY_SYSTEM_FIELDS: SystemField[] = [
   },
 ];
 
-const MOVING_ORDER_SYSTEM_FIELDS: SystemField[] = [
+const PROPERTY_DEAL_SYSTEM_FIELDS: SystemField[] = [
   {
     kind: "system",
-    entityType: "moving_order",
-    label: "מזהה הזמנה (מסמך)",
-    fieldId: "moving_order_doc_order_id",
-    type: "readonly",
-    isRequired: false,
+    entityType: "property_deal",
+    label: "שם עסקה",
+    fieldId: "property_deal_name",
+    type: "text",
+    isRequired: true,
     isActive: true,
   },
-  {
-    kind: "system",
-    entityType: "moving_order",
-    label: "פייפליין הזמנה",
-    fieldId: "moving_order_pipeline_id_sys",
-    type: "readonly",
-    isRequired: false,
-    isActive: true,
-  },
-  {
-    kind: "system",
-    entityType: "moving_order",
-    label: "שלב נוכחי",
-    fieldId: "moving_order_stage_sys",
-    type: "readonly",
-    isRequired: false,
-    isActive: true,
-  },
+  { kind: "system", entityType: "property_deal", label: "פייפליין", fieldId: "property_deal_pipeline_id", type: "select", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "שלב בפייפליין", fieldId: "property_deal_pipeline_stage", type: "select", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "סטטוס עסקה", fieldId: "property_deal_status", type: "select", isRequired: false, isActive: true, options: ["בהתאמה", "נחתם", "סיום רכישה", "נמכר"] },
+  { kind: "system", entityType: "property_deal", label: "סוג עסקה", fieldId: "property_deal_deal_type", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "עיר", fieldId: "property_deal_city", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "כתובת מלאה", fieldId: "property_deal_full_address", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "כמות לקוחות", fieldId: "property_deal_client_count", type: "number", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "לקוחות משויכים", fieldId: "property_deal_linked_contact_ids", type: "label", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "הסכם מכר", fieldId: "property_deal_sale_agreement_url", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "תיקיית דרייב", fieldId: "property_deal_drive_folder_url", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "תכנית עסקית", fieldId: "property_deal_business_plan_url", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "הערות עסקה", fieldId: "property_deal_notes", type: "text", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "תאריך יצירה", fieldId: "property_deal_created_at", type: "readonly", isRequired: false, isActive: true },
+  { kind: "system", entityType: "property_deal", label: "תאריך עדכון", fieldId: "property_deal_updated_at", type: "readonly", isRequired: false, isActive: true },
 ];
 
 /** בטננט hot-afik לא מנהלים הזמנות הובלה ולא מציגים שני שדות מערכת בהזדמנות. */
@@ -341,8 +337,6 @@ function LabelsCatalogBlock() {
 type FieldsClientProps = { tenantId?: string | null };
 
 export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
-  const isHotAfikFieldsTenant = tenantId === "hot-afik";
-
   const [scope, setScope] = useState<FieldScope>("all");
   const [entityType, setEntityType] = useState<EntityType>("contact");
   const [loading, setLoading] = useState(false);
@@ -369,21 +363,18 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     setLoading(true);
     setErr(null);
     try {
-      const hotAfik = isHotAfikFieldsTenant;
       const [res, pRes] = await Promise.all([
         fetch(`/api/custom-fields`, { credentials: "include", cache: "no-store" }),
         fetch(`/api/opportunities/pipelines`, { credentials: "include", cache: "no-store" }),
       ]);
-      const mRes = hotAfik
-        ? null
-        : await fetch(`/api/opportunities/pipelines?scope=moving_order`, { credentials: "include", cache: "no-store" });
-      if (res.status === 401 || pRes.status === 401 || (!hotAfik && mRes?.status === 401)) {
+      const dRes = await fetch(`/api/opportunities/pipelines?scope=property_deal`, { credentials: "include", cache: "no-store" });
+      if (res.status === 401 || pRes.status === 401 || dRes.status === 401) {
         window.location.href = `/login?returnTo=${encodeURIComponent(
           "/settings/fields"
         )}`;
         return;
       }
-      if (res.status === 403 || pRes.status === 403 || (!hotAfik && mRes?.status === 403)) {
+      if (res.status === 403 || pRes.status === 403 || dRes.status === 403) {
         window.location.href = `/pending?returnTo=${encodeURIComponent(
           "/settings/fields"
         )}`;
@@ -393,17 +384,15 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
         ok?: boolean;
         pipelines?: Array<{ id: string; name: string }>;
       };
-      const mJson = hotAfik
-        ? { ok: false as const, pipelines: [] as Array<{ id: string; name: string }> }
-        : ((await mRes!.json().catch(() => ({}))) as {
-            ok?: boolean;
-            pipelines?: Array<{ id: string; name: string }>;
-          });
+      const dJson = ((await dRes.json().catch(() => ({}))) as {
+        ok?: boolean;
+        pipelines?: Array<{ id: string; name: string }>;
+      });
       const merged: PipelineOpt[] = [];
       const seen = new Set<string>();
       for (const list of [
         ...(pJson.ok && pJson.pipelines ? pJson.pipelines : []),
-        ...(mJson.ok && mJson.pipelines ? mJson.pipelines : []),
+        ...(dJson.ok && dJson.pipelines ? dJson.pipelines : []),
       ]) {
         if (!seen.has(list.id)) {
           seen.add(list.id);
@@ -432,14 +421,6 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
-
-  useEffect(() => {
-    if (isHotAfikFieldsTenant && scope === "moving_order") setScope("all");
-  }, [isHotAfikFieldsTenant, scope]);
-
-  useEffect(() => {
-    if (isHotAfikFieldsTenant && entityType === "moving_order") setEntityType("contact");
-  }, [isHotAfikFieldsTenant, entityType]);
 
   function resetForm() {
     setEditingFieldId(null);
@@ -546,31 +527,30 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     setPipelinePick((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
-  const opportunitySystemForTenant: SystemField[] = isHotAfikFieldsTenant
-    ? OPPORTUNITY_SYSTEM_FIELDS.filter((f) => !HOT_AFIK_HIDDEN_OPPORTUNITY_SYSTEM_FIELD_IDS.has(f.fieldId))
-    : OPPORTUNITY_SYSTEM_FIELDS;
+  const opportunitySystemForTenant: SystemField[] = OPPORTUNITY_SYSTEM_FIELDS.filter(
+    (f) => !HOT_AFIK_HIDDEN_OPPORTUNITY_SYSTEM_FIELD_IDS.has(f.fieldId)
+  );
 
   const systemRows: SystemField[] = [
     ...CONTACT_SYSTEM_FIELDS,
     ...opportunitySystemForTenant,
-    ...(isHotAfikFieldsTenant ? [] : MOVING_ORDER_SYSTEM_FIELDS),
+    ...PROPERTY_DEAL_SYSTEM_FIELDS,
   ];
   const filteredSystemRows = systemRows.filter((f) => scope === "all" || f.entityType === scope);
-  const rowsForTenant = isHotAfikFieldsTenant ? rows.filter((f) => f.entityType !== "moving_order") : rows;
+  const rowsForTenant = rows.filter(
+    (f) =>
+      !f.fieldId.includes("mover") &&
+      !f.fieldId.includes("moving_order") &&
+      !f.fieldId.includes("moving")
+  );
   const filteredCustomRows = rowsForTenant.filter((f) => scope === "all" || f.entityType === scope);
 
-  const folderTabs: Array<{ id: FieldScope; label: string }> = isHotAfikFieldsTenant
-    ? [
-        { id: "all", label: "כל השדות" },
-        { id: "contact", label: "תיקיית אנשי קשר" },
-        { id: "opportunity", label: "תיקיית לקוחות" },
-      ]
-    : [
-        { id: "all", label: "כל השדות" },
-        { id: "contact", label: "תיקיית אנשי קשר" },
-        { id: "opportunity", label: "תיקיית לקוחות" },
-        { id: "moving_order", label: "תיקיית הזמנות הובלה" },
-      ];
+  const folderTabs: Array<{ id: FieldScope; label: string }> = [
+    { id: "all", label: "כל השדות" },
+    { id: "contact", label: "תיקיית אנשי קשר" },
+    { id: "opportunity", label: "תיקיית לקוחות" },
+    { id: "property_deal", label: "תיקיית עסקאות" },
+  ];
 
   return (
     <div style={{ maxWidth: 1100 }}>
@@ -598,9 +578,9 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
               border: "1px solid #e5e7eb",
             }}
           >
-            <option value="contact">Contact</option>
-            <option value="opportunity">Opportunity</option>
-            {!isHotAfikFieldsTenant ? <option value="moving_order">הזמנות הובלה</option> : null}
+            <option value="contact">איש קשר</option>
+            <option value="opportunity">לקוחות</option>
+            <option value="property_deal">עסקאות</option>
           </select>
         </div>
 

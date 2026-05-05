@@ -3,7 +3,7 @@ import { getAdminDb, getRequestTenantDatabaseId } from "@/lib/firebase/admin";
 import { invalidateTenantCachePrefix, withTenantTtlCache } from "@/lib/server/tenantMemoryCache";
 import { MOVER_OPPORTUNITY_FIELD_IDS } from "@/lib/movingOrders/fieldIds";
 
-export type CustomFieldEntity = "contact" | "opportunity" | "moving_order";
+export type CustomFieldEntity = "contact" | "opportunity" | "property_deal" | "moving_order";
 export type CustomFieldType =
   | "text"
   | "number"
@@ -57,7 +57,7 @@ function normalizeFieldId(raw: string): string {
 
 function ensureEntityPrefixedFieldId(entityType: CustomFieldEntity, raw: string): string {
   const normalized = normalizeFieldId(raw);
-  const base = normalized.replace(/^(contact|opportunity|opportiunity|moving_order)_+/g, "");
+  const base = normalized.replace(/^(contact|opportunity|opportiunity|property_deal|deal|moving_order)_+/g, "");
   if (!base) return "";
   return `${entityType}_${base}`;
 }
