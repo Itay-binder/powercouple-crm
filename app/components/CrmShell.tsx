@@ -73,6 +73,7 @@ export default function CrmShell({
           <CrmNavLink href="/inquiries" label="פניות" />
           <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>תפעול</div>
           <CrmNavLink href="/tasks" label="משימות" />
+          <CrmNavLink href="/calls" label="ניהול שיחות" />
           <CrmNavLink href="/calendar" label="לוח שנה" />
           {!isHotAfikTenant ? <CrmNavLink href="/billing" label="סליקה" /> : null}
           {!isHotAfikTenant ? (

@@ -220,6 +220,9 @@ export default function ChatsInboxClient() {
   const [sending, setSending] = useState(false);
   const [crmContact, setCrmContact] = useState<CrmLeadVm | null>(null);
   const [marketingSaving, setMarketingSaving] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteMsg, setNoteMsg] = useState<string | null>(null);
   const [isNarrow, setIsNarrow] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -362,6 +365,8 @@ export default function ChatsInboxClient() {
   useEffect(() => {
     prevMsgLenRef.current = 0;
     prevLastMsgIdRef.current = "";
+    setNoteDraft("");
+    setNoteMsg(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -455,6 +460,29 @@ export default function ChatsInboxClient() {
       setErr(e instanceof Error ? e.message : "עדכון נכשל");
     } finally {
       setMarketingSaving(false);
+    }
+  }
+
+  async function addContactNoteFromChat() {
+    if (!crmContact?.id || !noteDraft.trim()) return;
+    setNoteSaving(true);
+    setNoteMsg(null);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/contacts/${encodeURIComponent(crmContact.id)}/append-note`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: noteDraft.trim(), category: "שיחות" }),
+      });
+      const j = await parseJson<{ ok?: boolean; error?: string }>(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "הוספת הערה נכשלה");
+      setNoteDraft("");
+      setNoteMsg("הערה נוספה לאיש הקשר.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "הוספת הערה נכשלה");
+    } finally {
+      setNoteSaving(false);
     }
   }
 
@@ -1244,6 +1272,57 @@ export default function ChatsInboxClient() {
                     </dd>
                   </div>
                 ) : null}
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <a
+                    href={`/contacts/${encodeURIComponent(crmContact.id)}`}
+                    style={{
+                      border: `1px solid ${C.hairline2}`,
+                      borderRadius: 8,
+                      padding: "6px 10px",
+                      fontWeight: 700,
+                      textDecoration: "none",
+                      color: C.text,
+                      background: "#fff",
+                    }}
+                  >
+                    פתח איש קשר
+                  </a>
+                </div>
+                <div style={{ marginTop: 12, borderTop: `1px solid ${C.hairline}`, paddingTop: 10 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>הוסף הערה מהשיחה</div>
+                  <textarea
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder="רשמי כאן סיכום שיחה/עדכון..."
+                    style={{
+                      width: "100%",
+                      minHeight: 70,
+                      borderRadius: 8,
+                      border: `1px solid ${C.hairline2}`,
+                      padding: "8px 10px",
+                      fontFamily: font,
+                      fontSize: 13,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addContactNoteFromChat()}
+                    disabled={noteSaving || !noteDraft.trim()}
+                    style={{
+                      marginTop: 8,
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "8px 12px",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      background: "#6d28d9",
+                      color: "#fff",
+                    }}
+                  >
+                    {noteSaving ? "שומר…" : "שמור הערה"}
+                  </button>
+                  {noteMsg ? <div style={{ marginTop: 6, fontSize: 12, color: "#0f766e" }}>{noteMsg}</div> : null}
+                </div>
               </dl>
             ) : (
               <p style={{ margin: 0, color: C.muted, lineHeight: 1.5 }}>
