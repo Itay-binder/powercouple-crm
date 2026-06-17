@@ -16,11 +16,47 @@ function mimeForKind(kind: "IMAGE" | "VIDEO" | "DOCUMENT", fileName: string): st
   return "application/octet-stream";
 }
 
+/**
+ * מטא דורשת ל־file_name ב־Resumable Upload תבנית מחמירה (בדרך כלל ASCII, ללא רווחים וכו׳).
+ * שם מה־URL (Firebase, קידודים, עברית) עלול לשבור את ה־regex ולהחזיר #100.
+ */
+function sanitizeMetaUploadFileName(raw: string, kind: "IMAGE" | "VIDEO" | "DOCUMENT"): string {
+  const base = raw.replace(/\\/g, "/").split("/").pop() || "";
+  const noQuery = base.split("?")[0].split("#")[0];
+  const extFromRaw = (() => {
+    const m = noQuery.match(/\.([a-zA-Z0-9]{1,10})$/);
+    return m ? m[1].toLowerCase() : "";
+  })();
+  const allowedExt =
+    kind === "IMAGE"
+      ? ["jpg", "jpeg", "png", "webp"].includes(extFromRaw)
+        ? extFromRaw === "jpeg"
+          ? "jpg"
+          : extFromRaw
+        : "jpg"
+      : kind === "VIDEO"
+        ? "mp4"
+        : extFromRaw === "pdf"
+          ? "pdf"
+          : "bin";
+  const stem = noQuery.replace(/\.[^.]+$/, "").slice(0, 80);
+  const ascii = stem
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+  const safeStem = stem.length > 0 && ascii.length > 0 ? ascii : "header";
+  return `${safeStem}.${allowedExt}`.slice(0, 120);
+}
+
 function fileNameFromUrl(url: string, kind: "IMAGE" | "VIDEO" | "DOCUMENT"): string {
   try {
     const u = new URL(url);
-    const last = u.pathname.split("/").filter(Boolean).pop() || "file";
-    if (last.includes(".")) return last.slice(0, 120);
+    const last = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() || "file");
+    if (last && last !== "/") {
+      return sanitizeMetaUploadFileName(last, kind);
+    }
   } catch {
     // ignore
   }
@@ -66,7 +102,9 @@ export async function uploadMediaHandleFromUrl(
     throw new Error("Meta לא החזיר מזהה העלאה (upload session).");
   }
 
-  const uploadUrl = `${base}/${encodeURIComponent(sessionId)}`;
+  // Meta's resumable upload step must use the base host WITHOUT the API version prefix.
+  const graphHost = base.replace(/\/v\d+\.\d+$/, "");
+  const uploadUrl = `${graphHost}/${sessionId}`;
   const up = await fetch(uploadUrl, {
     method: "POST",
     headers: {

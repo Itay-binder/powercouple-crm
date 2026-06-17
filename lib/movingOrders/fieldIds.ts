@@ -27,6 +27,19 @@ export const MOVER_WELCOME_OPPORTUNITY_FIELD_IDS = {
   notes: "opportunity_mover_welcome_notes",
 } as const;
 
+/**
+ * מזהי מסמכים ב־customFields — שאלון וולקאם מוביל בלבד (למחיקה יזומה).
+ * לא כולל לידים, חבילה, או שדות זמינות של פייפליין «לקוחות משלמים».
+ */
+export const MOVER_WELCOME_QUESTIONNAIRE_CUSTOM_FIELD_IDS: readonly string[] = Array.from(
+  new Set([
+    ...Object.values(MOVER_WELCOME_OPPORTUNITY_FIELD_IDS).filter((id) =>
+      id.startsWith("opportunity_mover_welcome_")
+    ),
+    "opportunity_mover_welcome_crane",
+  ])
+);
+
 /** שדות מותאמים לאנשי קשר — מובילים */
 export const MOVER_FIELD_IDS = {
   isMover: "contact_mover_is_mover",
@@ -54,7 +67,12 @@ export const MOVER_OPPORTUNITY_FIELD_IDS = {
   workAvailabilityStatus: "opportunity_work_availability_status",
   immediateAvailability: "opportunity_immediate_availability",
   currentPackageLeadsCount: "opportunity_package_current_leads_count",
+  currentPackageSentLeadsCount: "opportunity_package_current_leads_count_sent",
   leadsCount: "opportunity_leads_count",
+  /** קאונטר יומי להזמנות שנשלחו בהתאמה למוביל (מתאפס אוטומטית לפי יום ישראל) */
+  dailyLeadsCount: "opportunity_daily_leads_count",
+  /** שדה עזר פנימי לתאריך יום ישראל של הקאונטר היומי (YYYY-MM-DD) */
+  dailyLeadsCountDayKey: "opportunity_daily_leads_count_day_key",
 } as const;
 
 /** כל מזהי השדות ב־Firestore (למיזוג אחרי validate ולוידוא קליטה) */

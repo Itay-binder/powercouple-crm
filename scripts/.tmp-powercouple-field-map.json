@@ -1,0 +1,24 @@
+{
+  "contact": {
+    "תז": "contact_pc_col_1",
+    "סטטוס משפחתי": "contact_pc_col_2",
+    "סטטוס תעסוקתי": "contact_pc_col_3",
+    "כתובת מגורים": "contact_pc_col_4",
+    "עיר מגורים": "contact_pc_col_5",
+    "הון עצמי": "contact_pc_col_6",
+    "תאריך אחרון שהשאיר פרטים": "contact_pc_col_12",
+    "תאריך ליד אחרון": "contact_pc_col_13"
+  },
+  "opportunity": {
+    "סטטוס נוסף": "opportunity_pc_col_7",
+    "מוצר לרכישה": "opportunity_pc_col_8",
+    "לינק לתשלום": "opportunity_pc_col_9",
+    "מתי ליצור קשר?": "opportunity_pc_col_10",
+    "Deal - שולם עד כה": "opportunity_pc_deal",
+    "תשלום פעימה שניה כניסה לתהליך": "opportunity_pc_col_14",
+    "פעימה שלישית - יתרה לתשלום": "opportunity_pc_col_15",
+    "כמה שולם": "opportunity_pc_col_16",
+    "כמה נותר לתשלום": "opportunity_pc_col_17",
+    "האם בוצע תשלום  מלא": "opportunity_pc_col_18"
+  }
+}

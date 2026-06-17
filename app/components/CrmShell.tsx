@@ -1,7 +1,8 @@
 import UserMenu from "@/app/components/UserMenu";
 import CrmNavLink from "@/app/components/CrmNavLink";
 import CrmGlobalNotifications from "@/app/components/CrmGlobalNotifications";
-import CrmGlobalSearch from "@/app/components/CrmGlobalSearch";
+import { isMovingOrdersTenant } from "@/lib/tenant/movingOrders";
+
 export type CrmTenantOption = { id: string; label: string };
 
 type Props = {
@@ -43,38 +44,34 @@ export default function CrmShell({
           className="crm-shell-aside-top"
           style={{
             display: "flex",
-            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "space-between",
             gap: 12,
             marginBottom: 18,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div style={{ lineHeight: 1.1 }}>
-              <div style={{ fontWeight: 800 }}>Power Couple CRM</div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>קליטת לקוחות</div>
-            </div>
-            <UserMenu
-              email={email}
-              tenants={tenants}
-              currentTenantId={currentTenantId}
-            />
+          <div style={{ lineHeight: 1.1 }}>
+            <div style={{ fontWeight: 800 }}>Liftygo CRM</div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>MVP</div>
           </div>
-          <CrmGlobalSearch />
+          <UserMenu
+            email={email}
+            tenants={tenants}
+            currentTenantId={currentTenantId}
+          />
         </div>
 
         <nav className="crm-shell-nav" style={{ display: "grid", gap: 8, marginTop: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 4 }}>ראשי</div>
-          <CrmNavLink href="/dashboard" label="דשבורד" />
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>אנשי קשר</div>
+          <CrmNavLink href="/dashboard" label={'דשבורד מנכ"ל'} />
           <CrmNavLink href="/contacts" label="אנשי קשר" />
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>ניהול לקוחות</div>
-          <CrmNavLink href="/pipeline" label="לקוחות" />
-          <CrmNavLink href="/deals" label="עסקאות נדל״ן" />
-          <CrmNavLink href="/inquiries" label="פניות" />
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#9ca3af", marginTop: 12 }}>תפעול</div>
+          <CrmNavLink href="/pipeline" label="ניהול הזדמנויות" />
           <CrmNavLink href="/tasks" label="משימות" />
           <CrmNavLink href="/calls" label="ניהול שיחות" />
           <CrmNavLink href="/calendar" label="לוח שנה" />
+          {isMovingOrdersTenant(currentTenantId) ? (
+            <CrmNavLink href="/orders" label="ניהול הזמנות" />
+          ) : null}
+          <CrmNavLink href="/mover-profiles" label="פרופיל מוביל" />
           {!isHotAfikTenant ? <CrmNavLink href="/billing" label="סליקה" /> : null}
           {!isHotAfikTenant ? (
             <CrmNavLink href="/whatsapp-automations" label="אוטומציות ווצאפ" />

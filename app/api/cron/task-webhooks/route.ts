@@ -6,7 +6,10 @@ import { sweepTaskWebhooks } from "@/lib/tasks/webhookSweep";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const DISABLED = true;
+
 export async function GET(req: NextRequest) {
+  if (DISABLED) return NextResponse.json({ ok: false, error: "disabled" }, { status: 503 });
   const secret = process.env.CRON_SECRET?.trim();
   const auth = req.headers.get("authorization") ?? "";
   if (secret) {

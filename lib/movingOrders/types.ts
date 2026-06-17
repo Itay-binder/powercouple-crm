@@ -119,7 +119,14 @@ export type MoverMatchEnrichment = {
   smallMover: string;
   sos: string;
   crane: string;
+  /** סה״כ פניות (לידים) — התאמת הזמנות; נשמר לתאימות / שימוש חיצוני */
   leadCount: string;
+  /** לידים שנשלחו בחבילה הנוכחית (שדה opportunity) */
+  packageCurrentSentLeads: string;
+  /** לידים שנרכשו בחבילה הנוכחית */
+  packageCurrentPurchasedLeads: string;
+  /** לידים שנספרו היום (יום ישראל; מתאים לשדה היומי במערכת) */
+  dailyLeadsToday: string;
   /** lastLeadAt של ההזדמנות (ליד אחרון שקיבל המוביל) */
   lastLeadAt: string | null;
   flexibleHours: string;

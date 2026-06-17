@@ -1,9 +1,8 @@
 "use client";
 
-import { signInWithPopup, signOut } from "firebase/auth";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { getFirebaseAuth, getGoogleProvider } from "@/lib/firebase/client";
+import { getBrowserSupabase } from "@/lib/supabase/browser";
 
 const LOGIN_TITLE = "התחברות ל-CRM";
 
@@ -17,35 +16,24 @@ export default function LoginForm() {
     setErr(null);
     setLoading(true);
     try {
-      const auth = getFirebaseAuth();
-      const cred = await signInWithPopup(auth, getGoogleProvider());
-      const idToken = await cred.user.getIdToken();
-
-      const r = await fetch("/api/auth/session", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
-      });
-
-      const data = (await r.json().catch(() => ({}))) as {
-        error?: string;
-        code?: string;
-      };
-
-      if (!r.ok) {
-        if (r.status === 403 && data.code === "NOT_INVITED") {
-          await signOut(auth);
-        }
-        setErr(data.error ?? "התחברות נכשלה");
-        return;
-      }
-
-      const next =
+      const supabase = getBrowserSupabase();
+      const safeReturnTo =
         returnTo.startsWith("/") && !returnTo.includes("//")
           ? returnTo
           : "/dashboard";
-      window.location.assign(next);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?returnTo=${encodeURIComponent(
+            safeReturnTo
+          )}`,
+        },
+      });
+      if (error) {
+        setErr(error.message || "התחברות נכשלה");
+        return;
+      }
+      // signInWithOAuth redirects the browser to Google; nothing else to do here.
     } catch (e) {
       setErr(e instanceof Error ? e.message : "שגיאה");
     } finally {

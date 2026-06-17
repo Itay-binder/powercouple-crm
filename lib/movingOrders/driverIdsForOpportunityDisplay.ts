@@ -17,6 +17,18 @@ function sortedSuggestedDriverIds(order: MovingOrderRecord): string[] {
   );
 }
 
+/** מובילים להצגה כצ׳יפ הזדמנות — לפני שליחה: כל מי שאינו אדום (ירוק + כתום). אחרי שליחה: לפי נשלחו בפועל. */
+function opportunityColumnDriverIds(order: MovingOrderRecord): string[] {
+  const sent = order.sentMatchDriverIds ?? [];
+  if (sent.length > 0) return sent;
+  if (!order.dispatchedAt?.trim()) {
+    return sortedSuggestedDriverIds(order).filter(
+      (id) => (order.driverMatchFlags?.[id] ?? "ok") !== "red"
+    );
+  }
+  return effectiveSelectedDriverIds(order);
+}
+
 /** מובילים שהיו מסומנים לשליחה (כמו בלקוח לפני POST) — ל־fallback הזמנות ישנות */
 function effectiveSelectedDriverIds(order: MovingOrderRecord): string[] {
   const all = [
@@ -35,10 +47,7 @@ function effectiveSelectedDriverIds(order: MovingOrderRecord): string[] {
  * לא כולל מובילים שרק הוצעו בהתאמה ולא נשלחו.
  */
 export function driverIdsForOpportunitiesColumn(order: MovingOrderRecord): string[] {
-  const sent = order.sentMatchDriverIds ?? [];
-  if (sent.length > 0) return sent;
-  if (!order.dispatchedAt?.trim()) return [];
-  const selected = effectiveSelectedDriverIds(order);
+  const ids = opportunityColumnDriverIds(order);
   const rank = new Map(sortedSuggestedDriverIds(order).map((id, i) => [id, i]));
-  return [...selected].sort((a, b) => (rank.get(a) ?? 999) - (rank.get(b) ?? 999));
+  return [...ids].sort((a, b) => (rank.get(a) ?? 999) - (rank.get(b) ?? 999));
 }

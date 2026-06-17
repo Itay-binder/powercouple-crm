@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { isMovingOrdersTenant } from "@/lib/tenant/movingOrders";
 
-type EntityType = "contact" | "opportunity" | "property_deal";
+type EntityType = "contact" | "opportunity" | "moving_order";
 type FieldType =
   | "text"
   | "number"
@@ -49,7 +50,7 @@ const CONTACT_SYSTEM_FIELDS: SystemField[] = [
 ];
 
 const OPPORTUNITY_SYSTEM_FIELDS: SystemField[] = [
-  { kind: "system", entityType: "opportunity", label: "שם לקוח (פייפליין)", fieldId: "opportunity_name", type: "text", isRequired: true, isActive: true },
+  { kind: "system", entityType: "opportunity", label: "שם הזדמנות", fieldId: "opportunity_name", type: "text", isRequired: true, isActive: true },
   { kind: "system", entityType: "opportunity", label: "פייפליין", fieldId: "opportunity_pipeline_id", type: "select", isRequired: true, isActive: true },
   { kind: "system", entityType: "opportunity", label: "שלב בפייפליין", fieldId: "opportunity_stage", type: "select", isRequired: true, isActive: true },
   { kind: "system", entityType: "opportunity", label: "סטטוס", fieldId: "opportunity_status", type: "select", isRequired: false, isActive: true, options: ["פתוח", "זכיה", "הפסד"] },
@@ -82,36 +83,53 @@ const OPPORTUNITY_SYSTEM_FIELDS: SystemField[] = [
     isRequired: false,
     isActive: true,
   },
-];
-
-const PROPERTY_DEAL_SYSTEM_FIELDS: SystemField[] = [
   {
     kind: "system",
-    entityType: "property_deal",
-    label: "שם עסקה",
-    fieldId: "property_deal_name",
-    type: "text",
-    isRequired: true,
+    entityType: "opportunity",
+    label: "כמות לידים יומית (מתאפס ב־00:00 ישראל)",
+    fieldId: "opportunity_daily_leads_count",
+    type: "number",
+    isRequired: false,
     isActive: true,
   },
-  { kind: "system", entityType: "property_deal", label: "פייפליין", fieldId: "property_deal_pipeline_id", type: "select", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "שלב בפייפליין", fieldId: "property_deal_pipeline_stage", type: "select", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "סטטוס עסקה", fieldId: "property_deal_status", type: "select", isRequired: false, isActive: true, options: ["בהתאמה", "נחתם", "סיום רכישה", "נמכר"] },
-  { kind: "system", entityType: "property_deal", label: "סוג עסקה", fieldId: "property_deal_deal_type", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "עיר", fieldId: "property_deal_city", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "כתובת מלאה", fieldId: "property_deal_full_address", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "כמות לקוחות", fieldId: "property_deal_client_count", type: "number", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "לקוחות משויכים", fieldId: "property_deal_linked_contact_ids", type: "label", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "הסכם מכר", fieldId: "property_deal_sale_agreement_url", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "תיקיית דרייב", fieldId: "property_deal_drive_folder_url", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "תכנית עסקית", fieldId: "property_deal_business_plan_url", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "הערות עסקה", fieldId: "property_deal_notes", type: "text", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "תאריך יצירה", fieldId: "property_deal_created_at", type: "readonly", isRequired: false, isActive: true },
-  { kind: "system", entityType: "property_deal", label: "תאריך עדכון", fieldId: "property_deal_updated_at", type: "readonly", isRequired: false, isActive: true },
+];
+
+const MOVING_ORDER_SYSTEM_FIELDS: SystemField[] = [
+  {
+    kind: "system",
+    entityType: "moving_order",
+    label: "מזהה הזמנה (מסמך)",
+    fieldId: "moving_order_doc_order_id",
+    type: "readonly",
+    isRequired: false,
+    isActive: true,
+  },
+  {
+    kind: "system",
+    entityType: "moving_order",
+    label: "פייפליין הזמנה",
+    fieldId: "moving_order_pipeline_id_sys",
+    type: "readonly",
+    isRequired: false,
+    isActive: true,
+  },
+  {
+    kind: "system",
+    entityType: "moving_order",
+    label: "שלב נוכחי",
+    fieldId: "moving_order_stage_sys",
+    type: "readonly",
+    isRequired: false,
+    isActive: true,
+  },
 ];
 
 /** בטננט hot-afik לא מנהלים הזמנות הובלה ולא מציגים שני שדות מערכת בהזדמנות. */
-const HOT_AFIK_HIDDEN_OPPORTUNITY_SYSTEM_FIELD_IDS = new Set(["opportunity_last_lead_at", "opportunity_leads_count"]);
+const HOT_AFIK_HIDDEN_OPPORTUNITY_SYSTEM_FIELD_IDS = new Set([
+  "opportunity_last_lead_at",
+  "opportunity_leads_count",
+  "opportunity_daily_leads_count",
+]);
 
 const LABEL_SWATCHES = [
   "#2563eb",
@@ -178,7 +196,7 @@ function LabelsCatalogBlock() {
   }
 
   async function removeLabel(id: string) {
-    if (!window.confirm("למחוק תגית זו מכל הלקוחות והאנשי קשר?")) return;
+    if (!window.confirm("למחוק תגית זו מכל ההזדמנויות והאנשי קשר?")) return;
     const res = await fetch(`/api/labels/${encodeURIComponent(id)}`, {
       method: "DELETE",
       credentials: "include",
@@ -203,7 +221,7 @@ function LabelsCatalogBlock() {
     >
       <h2 style={{ margin: "0 0 8px", fontSize: 17 }}>קטלוג תגיות (Labels)</h2>
       <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>
-        סוג שדה <strong>label</strong> ב-API: מערך <code>labelIds</code> על לקוח (פייפליין) או איש קשר. ניהול המזהים:
+        סוג שדה <strong>label</strong> ב-API: מערך <code>labelIds</code> על הזדמנות או איש קשר. ניהול המזהים:
         <code style={{ marginInlineStart: 6 }}>GET/POST /api/labels</code>,{" "}
         <code>PATCH/DELETE /api/labels/[id]</code>. שמות ישנים ב-<code>tags</code> עדיין מתקבלים בזמן מעבר
         ומתורגמים לפי שם תגית.
@@ -337,6 +355,8 @@ function LabelsCatalogBlock() {
 type FieldsClientProps = { tenantId?: string | null };
 
 export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
+  const isHotAfikFieldsTenant = tenantId === "hot-afik";
+
   const [scope, setScope] = useState<FieldScope>("all");
   const [entityType, setEntityType] = useState<EntityType>("contact");
   const [loading, setLoading] = useState(false);
@@ -356,6 +376,12 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
   const [pipelinePick, setPipelinePick] = useState<string[]>([]);
   /** false = כל הפייפליינים (שולחים pipelineIds ריק); true = רק הנבחרים ב-pipelinePick */
   const [restrictPipelines, setRestrictPipelines] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupMsg, setCleanupMsg] = useState<string | null>(null);
+
+  const showMovingOrdersCleanup =
+    !isHotAfikFieldsTenant && isMovingOrdersTenant(tenantId ?? "");
 
   const pipelineNameById = useMemo(() => new Map(pipelines.map((p) => [p.id, p.name])), [pipelines]);
 
@@ -363,18 +389,21 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     setLoading(true);
     setErr(null);
     try {
+      const hotAfik = isHotAfikFieldsTenant;
       const [res, pRes] = await Promise.all([
         fetch(`/api/custom-fields`, { credentials: "include", cache: "no-store" }),
         fetch(`/api/opportunities/pipelines`, { credentials: "include", cache: "no-store" }),
       ]);
-      const dRes = await fetch(`/api/opportunities/pipelines?scope=property_deal`, { credentials: "include", cache: "no-store" });
-      if (res.status === 401 || pRes.status === 401 || dRes.status === 401) {
+      const mRes = hotAfik
+        ? null
+        : await fetch(`/api/opportunities/pipelines?scope=moving_order`, { credentials: "include", cache: "no-store" });
+      if (res.status === 401 || pRes.status === 401 || (!hotAfik && mRes?.status === 401)) {
         window.location.href = `/login?returnTo=${encodeURIComponent(
           "/settings/fields"
         )}`;
         return;
       }
-      if (res.status === 403 || pRes.status === 403 || dRes.status === 403) {
+      if (res.status === 403 || pRes.status === 403 || (!hotAfik && mRes?.status === 403)) {
         window.location.href = `/pending?returnTo=${encodeURIComponent(
           "/settings/fields"
         )}`;
@@ -384,15 +413,17 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
         ok?: boolean;
         pipelines?: Array<{ id: string; name: string }>;
       };
-      const dJson = ((await dRes.json().catch(() => ({}))) as {
-        ok?: boolean;
-        pipelines?: Array<{ id: string; name: string }>;
-      });
+      const mJson = hotAfik
+        ? { ok: false as const, pipelines: [] as Array<{ id: string; name: string }> }
+        : ((await mRes!.json().catch(() => ({}))) as {
+            ok?: boolean;
+            pipelines?: Array<{ id: string; name: string }>;
+          });
       const merged: PipelineOpt[] = [];
       const seen = new Set<string>();
       for (const list of [
         ...(pJson.ok && pJson.pipelines ? pJson.pipelines : []),
-        ...(dJson.ok && dJson.pipelines ? dJson.pipelines : []),
+        ...(mJson.ok && mJson.pipelines ? mJson.pipelines : []),
       ]) {
         if (!seen.has(list.id)) {
           seen.add(list.id);
@@ -421,6 +452,64 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+        const j = (await res.json().catch(() => ({}))) as { ok?: boolean; isAdmin?: boolean };
+        if (res.ok && j.ok && j.isAdmin) setIsAdmin(true);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  async function deleteMoverWelcomeQuestionnaireFields() {
+    setCleanupMsg(null);
+    const ok = window.confirm(
+      "למחוק את כל שדות «שאלון וולקאם מוביל» (מזהים opportunity_mover_welcome_*) מהמערכת?\n\nלא יימחקו: מספר לידים, חבילה נוכחית, כמות נשלחו בחבילה, וזמינות לקבל לידים."
+    );
+    if (!ok) return;
+    setCleanupBusy(true);
+    try {
+      const res = await fetch("/api/moving-orders/delete-mover-welcome-fields", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        deleted?: string[];
+        failed?: Array<{ fieldId: string; error: string }>;
+      };
+      if (!res.ok || !j.ok) {
+        setCleanupMsg(j.error ?? "המחיקה נכשלה");
+        return;
+      }
+      const n = j.deleted?.length ?? 0;
+      const fail = j.failed?.length ?? 0;
+      if (fail > 0) {
+        setCleanupMsg(`נמחקו ${n} שדות; ${fail} נכשלו (ראה לוג שרת).`);
+      } else {
+        setCleanupMsg(`נמחקו ${n} שדות מותאמים. רענן את עמוד ההזדמנות כדי לראות את העדכון.`);
+      }
+      await load();
+    } catch {
+      setCleanupMsg("המחיקה נכשלה");
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (isHotAfikFieldsTenant && scope === "moving_order") setScope("all");
+  }, [isHotAfikFieldsTenant, scope]);
+
+  useEffect(() => {
+    if (isHotAfikFieldsTenant && entityType === "moving_order") setEntityType("contact");
+  }, [isHotAfikFieldsTenant, entityType]);
 
   function resetForm() {
     setEditingFieldId(null);
@@ -527,34 +616,71 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
     setPipelinePick((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
-  const opportunitySystemForTenant: SystemField[] = OPPORTUNITY_SYSTEM_FIELDS.filter(
-    (f) => !HOT_AFIK_HIDDEN_OPPORTUNITY_SYSTEM_FIELD_IDS.has(f.fieldId)
-  );
+  const opportunitySystemForTenant: SystemField[] = isHotAfikFieldsTenant
+    ? OPPORTUNITY_SYSTEM_FIELDS.filter((f) => !HOT_AFIK_HIDDEN_OPPORTUNITY_SYSTEM_FIELD_IDS.has(f.fieldId))
+    : OPPORTUNITY_SYSTEM_FIELDS;
 
   const systemRows: SystemField[] = [
     ...CONTACT_SYSTEM_FIELDS,
     ...opportunitySystemForTenant,
-    ...PROPERTY_DEAL_SYSTEM_FIELDS,
+    ...(isHotAfikFieldsTenant ? [] : MOVING_ORDER_SYSTEM_FIELDS),
   ];
   const filteredSystemRows = systemRows.filter((f) => scope === "all" || f.entityType === scope);
-  const rowsForTenant = rows.filter(
-    (f) =>
-      !f.fieldId.includes("mover") &&
-      !f.fieldId.includes("moving_order") &&
-      !f.fieldId.includes("moving")
-  );
+  const rowsForTenant = isHotAfikFieldsTenant ? rows.filter((f) => f.entityType !== "moving_order") : rows;
   const filteredCustomRows = rowsForTenant.filter((f) => scope === "all" || f.entityType === scope);
 
-  const folderTabs: Array<{ id: FieldScope; label: string }> = [
-    { id: "all", label: "כל השדות" },
-    { id: "contact", label: "תיקיית אנשי קשר" },
-    { id: "opportunity", label: "תיקיית לקוחות" },
-    { id: "property_deal", label: "תיקיית עסקאות" },
-  ];
+  const folderTabs: Array<{ id: FieldScope; label: string }> = isHotAfikFieldsTenant
+    ? [
+        { id: "all", label: "כל השדות" },
+        { id: "contact", label: "תיקיית אנשי קשר" },
+        { id: "opportunity", label: "תיקיית הזדמנויות" },
+      ]
+    : [
+        { id: "all", label: "כל השדות" },
+        { id: "contact", label: "תיקיית אנשי קשר" },
+        { id: "opportunity", label: "תיקיית הזדמנויות" },
+        { id: "moving_order", label: "תיקיית הזמנות הובלה" },
+      ];
 
   return (
     <div style={{ maxWidth: 1100 }}>
       <h1 style={{ margin: "4px 0 10px", fontSize: 20 }}>שדות מותאמים</h1>
+      {showMovingOrdersCleanup && isAdmin ? (
+        <div
+          style={{
+            background: "#fffbeb",
+            border: "1px solid #fcd34d",
+            borderRadius: 16,
+            padding: 14,
+            marginBottom: 14,
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>ניקוי חד־פעמי: שאלון וולקאם מוביל</div>
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "#6b7280", lineHeight: 1.5 }}>
+            מוחק רק מסמכי שדות עם הקידומת <code>opportunity_mover_welcome_</code> — לא נוגע בשדות לידים,
+            חבילה, או זמינות לידים.
+          </p>
+          <button
+            type="button"
+            disabled={cleanupBusy}
+            onClick={() => void deleteMoverWelcomeQuestionnaireFields()}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: "1px solid #b91c1c",
+              background: "#fff",
+              color: "#b91c1c",
+              fontWeight: 800,
+              cursor: cleanupBusy ? "wait" : "pointer",
+            }}
+          >
+            {cleanupBusy ? "מוחק…" : "מחק שדות וולקאם מוביל"}
+          </button>
+          {cleanupMsg ? (
+            <div style={{ marginTop: 10, fontSize: 13, color: "#065f46" }}>{cleanupMsg}</div>
+          ) : null}
+        </div>
+      ) : null}
       <LabelsCatalogBlock />
       <div
         style={{
@@ -578,9 +704,9 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
               border: "1px solid #e5e7eb",
             }}
           >
-            <option value="contact">איש קשר</option>
-            <option value="opportunity">לקוחות</option>
-            <option value="property_deal">עסקאות</option>
+            <option value="contact">Contact</option>
+            <option value="opportunity">Opportunity</option>
+            {!isHotAfikFieldsTenant ? <option value="moving_order">הזמנות הובלה</option> : null}
           </select>
         </div>
 
@@ -675,7 +801,7 @@ export default function FieldsClient({ tenantId = null }: FieldsClientProps) {
         >
           <div style={{ fontWeight: 800, marginBottom: 6 }}>היקף פייפליין (אופציונלי)</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-            רלוונטי בעיקר לשדות על לקוחות ולידים לפי פייפליין. ברירת מחדל: השדה חל על כל הפייפליינים.
+            רלוונטי בעיקר לשדות על הזדמנות ולידים לפי פייפליין. ברירת מחדל: השדה חל על כל הפייפליינים.
           </div>
           {pipelines.length === 0 ? (
             <div style={{ fontSize: 13, color: "#6b7280" }}>אין פייפליינים מוגדרים — השדה יחול על כולם.</div>

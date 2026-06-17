@@ -8,7 +8,10 @@ export const revalidate = 0;
 
 type ApiErr = { ok: false; error: string };
 
+const DISABLED = true;
+
 export async function POST(req: NextRequest) {
+  if (DISABLED) return NextResponse.json({ ok: false, error: "disabled" } satisfies ApiErr, { status: 503 });
   const auth = await requireApprovedUser(req);
   if (!auth.ok) {
     return NextResponse.json({ ok: false, error: auth.error } satisfies ApiErr, {

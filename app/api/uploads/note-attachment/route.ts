@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
-import { getAdminStorageBucket } from "@/lib/firebase/admin";
+import { uploadPublicFile, formatStorageError } from "@/lib/supabase/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -28,39 +28,16 @@ export async function POST(req: NextRequest) {
     }
 
     const rawName = file.name?.trim() || "file";
-    const safeName = rawName.replace(/[^\w.\u0590-\u05FF\- ]+/g, "_").slice(0, 180);
+    const safeName = rawName.replace(/[^\w.֐-׿\- ]+/g, "_").slice(0, 180);
     const id = randomUUID();
-    const path = `crm-note-attachments/${id}-${safeName}`;
+    const objectPath = `crm-note-attachments/${id}-${safeName}`;
 
     const buf = Buffer.from(await file.arrayBuffer());
-    const bucket = getAdminStorageBucket();
-    const gcsFile = bucket.file(path);
-    await gcsFile.save(buf, {
-      metadata: {
-        contentType: file.type || "application/octet-stream",
-      },
-    });
-
-    try {
-      await gcsFile.makePublic();
-    } catch {
-      const [signedUrl] = await gcsFile.getSignedUrl({
-        version: "v4",
-        action: "read",
-        expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      });
-      return NextResponse.json({
-        ok: true,
-        attachment: {
-          id,
-          fileName: rawName,
-          url: signedUrl,
-        },
-      });
-    }
-
-    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-    const url = `https://storage.googleapis.com/${bucket.name}/${encodedPath}`;
+    const { url } = await uploadPublicFile(
+      objectPath,
+      buf,
+      file.type || "application/octet-stream"
+    );
 
     return NextResponse.json({
       ok: true,
@@ -72,7 +49,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "העלאה נכשלה" } satisfies ApiErr,
+      { ok: false, error: formatStorageError(e) } satisfies ApiErr,
       { status: 500 }
     );
   }

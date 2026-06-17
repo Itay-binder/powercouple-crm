@@ -56,6 +56,8 @@ export default function OrdersClient() {
   /** `orderId:driverId` בזמן שליחת ליד בודד */
   const [sendingLeadKey, setSendingLeadKey] = useState<string | null>(null);
   const autoRematchedOnceRef = useRef(false);
+  const sendMatchInFlightRef = useRef<Set<string>>(new Set());
+  const sendLeadInFlightRef = useRef<Set<string>>(new Set());
 
   const {
     data: ordersSwrData,
@@ -148,6 +150,8 @@ export default function OrdersClient() {
   }
 
   async function sendMatch(order: MovingOrderRecord) {
+    if (sendMatchInFlightRef.current.has(order.id)) return;
+    sendMatchInFlightRef.current.add(order.id);
     const all = [
       ...new Set([...order.matchedDriverIds, ...order.optionalDriverIds, ...order.manualDriverIds]),
     ];
@@ -181,6 +185,7 @@ export default function OrdersClient() {
       alert("שגיאת רשת");
     } finally {
       setDispatching(null);
+      sendMatchInFlightRef.current.delete(order.id);
     }
   }
 
@@ -215,6 +220,8 @@ export default function OrdersClient() {
 
   async function sendLeadToDriver(order: MovingOrderRecord, driverId: string) {
     const key = `${order.id}:${driverId}`;
+    if (sendLeadInFlightRef.current.has(key)) return;
+    sendLeadInFlightRef.current.add(key);
     setSendingLeadKey(key);
     try {
       const res = await fetch(`/api/moving-orders/${encodeURIComponent(order.id)}/match-send-lead`, {
@@ -233,6 +240,7 @@ export default function OrdersClient() {
       alert("שגיאת רשת");
     } finally {
       setSendingLeadKey((cur) => (cur === key ? null : cur));
+      sendLeadInFlightRef.current.delete(key);
     }
   }
 

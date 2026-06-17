@@ -1,5 +1,4 @@
 import { getCrmSession } from "@/lib/auth/crmSession";
-import { isAdminEmail } from "@/lib/auth/profile";
 import { authDisabled } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 import CrmShell from "@/app/components/CrmShell";
@@ -24,18 +23,13 @@ export default async function ContactsPage() {
     );
   }
 
-  const isAdmin = ctx.profile.role === "admin" || isAdminEmail(ctx.profile.email);
-
   return (
     <CrmShell
       email={ctx.profile.email}
       tenants={ctx.accessibleTenants.map((t) => ({ id: t.id, label: t.label }))}
       currentTenantId={ctx.tenant.id}
     >
-      <ContactsClient
-        initialAssigneeScope={isAdmin ? "all" : "mine"}
-        canToggleAssigneeScope={isAdmin}
-      />
+      <ContactsClient />
     </CrmShell>
   );
 }

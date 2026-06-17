@@ -8,18 +8,40 @@ import { formatIsraelYmdUtc, israelTodayAndTomorrowKeys, parseTaskInstant } from
 type DashboardMetricsOk = {
   ok: true;
   opportunityCount: number;
+  ordersCount: number;
   leadsByUtmSource: Record<string, number>;
   payingCustomersPipelineId: string;
   payingCustomersPipelineName: string;
   payingCustomersInRangeCount: number;
   payingCustomersByUtmSource: Record<string, number>;
   payingCustomersOpenCount: number;
-  propertyDealsOpenCount: number;
-  propertyDealsPurchaseCount: number;
-  propertyDealsSoldCount: number;
-  salesPipelineId: string;
-  salesPipelineName: string;
-  salesStageCounts: Record<string, number>;
+  ordersPerMover: Array<{
+    opportunityId: string;
+    opportunityName: string;
+    orderCount: number;
+    isActive: boolean;
+  }>;
+  activeMoversByRegion: Array<{
+    region: string;
+    activeMoversCount: number;
+    drivers: Array<{
+      contactId: string;
+      name: string;
+      phone: string;
+      opportunityId: string;
+      opportunityName: string;
+    }>;
+  }>;
+  movingOrdersWorkspace: boolean;
+  /** הזמנות שנכנסו היום (יום לוח ישראל) */
+  ordersCreatedTodayIsrael: number;
+  metaAdsConnected: boolean;
+  metaAdsSpendToday: number | null;
+  metaAdsCurrency: string | null;
+  metaAdsActiveCampaigns: number | null;
+  metaAdsCampaignsWithSpendToday: number | null;
+  metaAdsError?: string;
+  warning?: string;
 };
 type DashboardMetricsErr = { ok: false; error: string };
 
@@ -37,13 +59,14 @@ type TaskRow = {
 
 type WidgetId =
   | "opp_count"
-  | "deals_open"
-  | "deals_purchase"
-  | "deals_sold"
+  | "orders_count"
   | "leads_by_channel"
   | "paying_count"
   | "customers_by_channel"
   | "paying_open"
+  | "orders_per_mover"
+  | "active_movers_by_region"
+  | "sales_mvp"
   | "tasks";
 
 type WidgetConfig = { id: WidgetId; title: string; visible: boolean };
@@ -51,9 +74,13 @@ const DASHBOARD_WIDGETS_KEY = "crm:dashboard:widgets";
 
 /** בטננט hot-afik הדשבורד מציג רק את המודולים הרלוונטיים ללקוח. */
 const HOT_AFIK_DASHBOARD_HIDDEN: ReadonlySet<WidgetId> = new Set([
+  "orders_per_mover",
+  "orders_count",
   "leads_by_channel",
   "paying_count",
   "customers_by_channel",
+  "sales_mvp",
+  "active_movers_by_region",
 ]);
 
 function isDashboardWidgetHiddenForTenant(tenantId: string | null | undefined, id: WidgetId): boolean {
@@ -61,14 +88,15 @@ function isDashboardWidgetHiddenForTenant(tenantId: string | null | undefined, i
 }
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
-  { id: "opp_count", title: "כמות לקוחות (בטווח)", visible: true },
-  { id: "deals_open", title: "עסקאות פתוחות (בטווח)", visible: true },
-  { id: "deals_purchase", title: "עסקאות — סיום רכישה (בטווח)", visible: true },
-  { id: "deals_sold", title: "עסקאות — נמכר (בטווח)", visible: true },
+  { id: "opp_count", title: "כמות לידים (הזדמנויות)", visible: true },
+  { id: "orders_count", title: "כמות הזמנות", visible: true },
   { id: "leads_by_channel", title: "לידים לפי ערוצים", visible: true },
   { id: "paying_count", title: "לקוחות במערכת (פייפליין לקוחות משלמים)", visible: true },
   { id: "customers_by_channel", title: "לקוחות לפי ערוצים", visible: true },
   { id: "paying_open", title: "לקוחות פעילים", visible: true },
+  { id: "orders_per_mover", title: "לידים פר מוביל (קאונטר)", visible: true },
+  { id: "active_movers_by_region", title: "מובילים פעילים לפי אזורים", visible: true },
+  { id: "sales_mvp", title: "מכירות (MVP)", visible: true },
   { id: "tasks", title: "משימות (היום · מחר · באיחור)", visible: true },
 ];
 
@@ -88,6 +116,16 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
   const [err, setErr] = useState<string | null>(null);
   const [widgets, setWidgets] = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
   const [manageOpen, setManageOpen] = useState(false);
+  const [driversRegionOpen, setDriversRegionOpen] = useState<{
+    region: string;
+    drivers: Array<{
+      contactId: string;
+      name: string;
+      phone: string;
+      opportunityId: string;
+      opportunityName: string;
+    }>;
+  } | null>(null);
 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -143,6 +181,18 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
   );
 
   const loading = Boolean((metricsLoading && !metrics) || (tasksLoading && !tasks.length));
+
+  const metaSpendLabel = useMemo(() => {
+    const m = metrics;
+    if (!m?.metaAdsConnected) return "—";
+    if (m.metaAdsSpendToday == null) return m.metaAdsError ? "שגיאה" : "—";
+    const cur = m.metaAdsCurrency || "ILS";
+    try {
+      return new Intl.NumberFormat("he-IL", { style: "currency", currency: cur }).format(m.metaAdsSpendToday);
+    } catch {
+      return `${m.metaAdsSpendToday.toFixed(2)} ${cur}`;
+    }
+  }, [metrics]);
 
   useEffect(() => {
     if (metricsSwrError && metricsSwrError.message !== DASH_AUTH_REDIRECT) {
@@ -217,7 +267,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
 
   function taskEntityHref(t: TaskRow) {
     return t.entityType === "contact"
-      ? `/contacts/${encodeURIComponent(t.entityId)}`
+      ? `/contacts?openContactId=${encodeURIComponent(t.entityId)}`
       : `/pipeline?openOpportunityId=${encodeURIComponent(t.entityId)}`;
   }
 
@@ -270,19 +320,12 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
     );
   }
 
-  function kpiCard(
-    label: string,
-    value: string | number,
-    hint?: string,
-    valueColor: string = "#6d28d9"
-  ) {
+  function kpiCard(label: string, value: string | number, hint?: string) {
     return (
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 16 }}>
-        <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 800, textAlign: "right" }}>{label}</div>
-        <div style={{ fontSize: 36, fontWeight: 900, color: valueColor, marginTop: 6, textAlign: "right" }}>{value}</div>
-        {hint ? (
-          <div style={{ marginTop: 6, fontSize: 11, color: "#9ca3af", fontWeight: 600, textAlign: "right" }}>{hint}</div>
-        ) : null}
+        <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 800 }}>{label}</div>
+        <div style={{ fontSize: 36, fontWeight: 900, color: "#6d28d9", marginTop: 6 }}>{value}</div>
+        {hint ? <div style={{ marginTop: 6, fontSize: 11, color: "#9ca3af", fontWeight: 600 }}>{hint}</div> : null}
       </div>
     );
   }
@@ -294,48 +337,20 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
       return (
         <div key={id}>
           {kpiCard(
-            "כמות לקוחות",
+            "כמות לידים",
             m ? prettyCount(m.opportunityCount) : "—",
-            "לקוחות שנוצרו בטווח התאריכים (כל הפייפליינים)"
+            "הזדמנויות שנוצרו בטווח התאריכים (כל הפייפליינים)"
           )}
         </div>
       );
     }
-    if (id === "deals_open") {
-      const green = "#15803d";
+    if (id === "orders_count") {
       return (
         <div key={id}>
           {kpiCard(
-            "עסקאות פתוחות",
-            m ? prettyCount(m.propertyDealsOpenCount) : "—",
-            "סטטוס בהתאמה / נחתם · עסקאות שנוצרו בטווח התאריכים",
-            green
-          )}
-        </div>
-      );
-    }
-    if (id === "deals_purchase") {
-      const green = "#15803d";
-      return (
-        <div key={id}>
-          {kpiCard(
-            "עסקאות — סיום רכישה",
-            m ? prettyCount(m.propertyDealsPurchaseCount) : "—",
-            "סטטוס «סיום רכישה» · יצירת הרשומה בטווח התאריכים",
-            green
-          )}
-        </div>
-      );
-    }
-    if (id === "deals_sold") {
-      const green = "#15803d";
-      return (
-        <div key={id}>
-          {kpiCard(
-            "עסקאות — נמכר (מכירה)",
-            m ? prettyCount(m.propertyDealsSoldCount) : "—",
-            "סטטוס «נמכר» · יצירת הרשומה בטווח התאריכים",
-            green
+            "כמות הזמנות",
+            m ? prettyCount(m.ordersCount) : "—",
+            m && !m.movingOrdersWorkspace ? "הזמנות זמינות רק כשמודול ההזמנות מופעל בעסק" : "הזמנות שנוצרו בטווח התאריכים"
           )}
         </div>
       );
@@ -343,7 +358,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
     if (id === "leads_by_channel") {
       return (
         <div key={id}>
-          {tableShell("לקוחות לפי ערוץ", "לפי utm_source של רשומת הלקוח בטווח התאריכים", renderUtmTable(m ? sortedEntries(m.leadsByUtmSource) : []))}
+          {tableShell("לידים לפי ערוצים", "לפי utm_source של ההזדמנות בטווח התאריכים", renderUtmTable(m ? sortedEntries(m.leadsByUtmSource) : []))}
         </div>
       );
     }
@@ -354,7 +369,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
             "לקוחות במערכת",
             m ? prettyCount(m.payingCustomersInRangeCount) : "—",
             m
-              ? `פייפליין: ${m.payingCustomersPipelineName} · לפי תאריך יצירת הלקוח בטווח`
+              ? `פייפליין: ${m.payingCustomersPipelineName} · לפי תאריך יצירת ההזדמנות בטווח`
               : undefined
           )}
         </div>
@@ -377,8 +392,120 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
           {kpiCard(
             "לקוחות פעילים",
             m ? prettyCount(m.payingCustomersOpenCount) : "—",
-            "רשומות בפייפליין «לקוחות משלמים» עם סטטוס פתוח (ללא סינון תאריכים)"
+            "הזדמנויות בפייפליין לקוחות משלמים עם סטטוס פתוח (ללא סינון תאריכים)"
           )}
+        </div>
+      );
+    }
+    if (id === "orders_per_mover") {
+      const rows = m?.ordersPerMover ?? [];
+      const subtitle =
+        "המספר לפי שדה opportunity_leads_count בפייפליין (כמו עמודת הקאונטר בניהול הזדמנויות). ממוין: פעילים (סטטוס פתוח) לפי כמות יורד, אחריהם לא פעילים. רקע אדום עדין = לא פעיל.";
+      const body =
+        rows.length === 0 ? (
+          <div style={{ padding: 14, color: "#6b7280", fontWeight: 600 }}>אין מובילים או אין הזמנות משויכות.</div>
+        ) : (
+          <table style={{ width: "100%", minWidth: 420, borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
+                  מוביל / הזדמנות
+                </th>
+                <th style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
+                  לידים (קאונטר)
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const inactive = !r.isActive;
+                return (
+                  <tr
+                    key={r.opportunityId}
+                    style={{
+                      borderBottom: "1px solid #f3f4f6",
+                      background: inactive ? "rgba(254, 226, 226, 0.35)" : undefined,
+                      boxShadow: inactive ? "inset 3px 0 0 rgba(248, 113, 113, 0.45)" : undefined,
+                    }}
+                  >
+                    <td style={{ padding: "10px 12px" }}>
+                      <a
+                        href={`/pipeline?openOpportunityId=${encodeURIComponent(r.opportunityId)}`}
+                        style={{
+                          color: inactive ? "#b91c1c" : "#4c1d95",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {r.opportunityName}
+                        {inactive ? (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#991b1b", marginInlineStart: 6 }}> · לא פעיל</span>
+                        ) : null}
+                      </a>
+                    </td>
+                    <td style={{ padding: "10px 12px", fontWeight: 800, color: inactive ? "#9f1239" : undefined }}>
+                      {prettyCount(r.orderCount)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        );
+      return <div key={id}>{tableShell("לידים פר מוביל (קאונטר)", subtitle, body)}</div>;
+    }
+    if (id === "active_movers_by_region") {
+      const rows = m?.activeMoversByRegion ?? [];
+      const body =
+        rows.length === 0 ? (
+          <div style={{ padding: 14, color: "#6b7280", fontWeight: 600 }}>אין נתונים להצגה.</div>
+        ) : (
+          <table style={{ width: "100%", minWidth: 460, borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
+                  אזור
+                </th>
+                <th style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
+                  כמות מובילים פעילים
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.region} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: "10px 12px", fontWeight: 700 }}>{r.region}</td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setDriversRegionOpen({ region: r.region, drivers: r.drivers })}
+                      style={{
+                        border: "1px solid #ddd6fe",
+                        background: "#faf5ff",
+                        color: "#5b21b6",
+                        borderRadius: 10,
+                        padding: "6px 10px",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {prettyCount(r.activeMoversCount)}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      return (
+        <div key={id}>
+          {tableShell("מובילים פעילים לפי אזורים", "כל האזורים מהגדרות אזורי פעילות. לחיצה על הכמות פותחת רשימת נהגים.", body)}
+        </div>
+      );
+    }
+    if (id === "sales_mvp") {
+      return (
+        <div key={id}>
+          {kpiCard("מכירות", "—", "בקרוב: סכום מכירות לפי טווח תאריכים (אין עדיין שדות נתונים מתאימים)")}
         </div>
       );
     }
@@ -421,7 +548,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
                       <td style={{ padding: "10px 12px" }}>{t.status}</td>
                       <td style={{ padding: "10px 12px" }}>
                         <a href={taskEntityHref(t)} style={{ color: "#4c1d95", fontWeight: 700 }}>
-                          {t.entityType === "contact" ? "איש קשר" : "לקוח"} · {t.entityName}
+                          {t.entityType === "contact" ? "איש קשר" : "הזדמנות"} · {t.entityName}
                         </a>
                       </td>
                       <td style={{ padding: "10px 12px" }}>
@@ -481,12 +608,7 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
     kpiRun = [];
   };
   const isKpiWidget = (id: WidgetId) =>
-    id === "opp_count" ||
-    id === "deals_open" ||
-    id === "deals_purchase" ||
-    id === "deals_sold" ||
-    id === "paying_count" ||
-    id === "paying_open";
+    id === "opp_count" || id === "orders_count" || id === "paying_count" || id === "paying_open" || id === "sales_mvp";
 
   for (const w of visibleWidgets) {
     if (isKpiWidget(w.id)) {
@@ -500,6 +622,56 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
 
   return (
     <div>
+      {tenantId !== "hot-afik" && (
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          marginBottom: 18,
+        }}
+      >
+        <div style={{ background: "linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)", border: "1px solid #c7d2fe", borderRadius: 16, padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#4338ca" }}>הוצאת מודעות היום (Meta)</div>
+          <div style={{ fontSize: 28, fontWeight: 900, color: "#312e81", marginTop: 6 }}>{metaSpendLabel}</div>
+          {metrics?.metaAdsError && metrics.metaAdsConnected ? (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#b91c1c" }}>{metrics.metaAdsError}</div>
+          ) : !metrics?.metaAdsConnected ? (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#6b7280" }}>
+              <a href="/meta-ads" style={{ color: "#4f46e5", fontWeight: 700 }}>
+                חברו Meta Ads
+              </a>
+            </div>
+          ) : (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#5b21b6" }}>
+              קמפיינים פעילים:{" "}
+              <strong>{metrics?.metaAdsActiveCampaigns ?? "—"}</strong>
+              {metrics && metrics.metaAdsCampaignsWithSpendToday != null ? (
+                <> · עם הוצאה היום: {metrics.metaAdsCampaignsWithSpendToday}</>
+              ) : null}
+            </div>
+          )}
+        </div>
+        <div style={{ background: "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)", border: "1px solid #6ee7b7", borderRadius: 16, padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#047857" }}>הזמנות שנכנסו היום</div>
+          <div style={{ fontSize: 28, fontWeight: 900, color: "#065f46", marginTop: 6 }}>
+            {metrics ? prettyCount(metrics.ordersCreatedTodayIsrael) : "—"}
+          </div>
+          {!metrics?.movingOrdersWorkspace ? (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#6b7280" }}>מודול הזמנות לא מופעל בעסק</div>
+          ) : (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#047857" }}>לפי יום לוח בישראל (עד ~8K הזמנות אחרונות)</div>
+          )}
+        </div>
+        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 16, padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#6b7280" }}>קישור מהיר</div>
+          <a href="/meta-ads" style={{ display: "inline-block", marginTop: 8, fontWeight: 800, color: "#1d4ed8" }}>
+            ניהול קמפיינים במטא →
+          </a>
+        </div>
+      </div>
+      )}
+
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <label style={{ fontSize: 12, fontWeight: 800, color: "#6b7280" }}>מתאריך</label>
@@ -592,33 +764,9 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
         </div>
       )}
 
-      {metrics && Object.keys(metrics.salesStageCounts ?? {}).length > 0 && (
-        <div style={{ marginTop: 18 }}>
-          <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-            ניהול לקוחות · {metrics.salesPipelineName}
-          </div>
-          <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12, lineHeight: 1.45 }}>
-            ספירת לקוחות לפי שלב בפייפליין. לחיצה פותחת את לוח הניהול מסונן לשלב.
-          </div>
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
-            {Object.entries(metrics.salesStageCounts).map(([stage, count]) => (
-              <a
-                key={stage}
-                href={`/pipeline?pipelineId=${encodeURIComponent(metrics.salesPipelineId)}&stage=${encodeURIComponent(stage)}`}
-                style={{
-                  textDecoration: "none",
-                  background: "#fff",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 14,
-                  padding: 14,
-                  color: "inherit",
-                }}
-              >
-                <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 800 }}>{stage}</div>
-                <div style={{ fontSize: 28, fontWeight: 900, color: "#059669", marginTop: 6 }}>{prettyCount(count)}</div>
-              </a>
-            ))}
-          </div>
+      {metrics?.warning && (
+        <div style={{ marginTop: 14, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", padding: 12, borderRadius: 12 }}>
+          {metrics.warning}
         </div>
       )}
 
@@ -629,6 +777,83 @@ export default function DashboardClient({ tenantId = null }: DashboardClientProp
       )}
 
       <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 20 }}>{renderedBlocks}</div>
+
+      {driversRegionOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setDriversRegionOpen(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(17,24,39,0.45)",
+            zIndex: 60,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(760px, 96vw)",
+              maxHeight: "88vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 14,
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid #f3f4f6", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ fontWeight: 900 }}>
+                נהגים באזור: {driversRegionOpen.region}
+                <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280", fontWeight: 600 }}>
+                  סה״כ: {prettyCount(driversRegionOpen.drivers.length)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDriversRegionOpen(null)}
+                style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 10, padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}
+              >
+                סגור
+              </button>
+            </div>
+            {driversRegionOpen.drivers.length === 0 ? (
+              <div style={{ padding: 14, color: "#6b7280", fontWeight: 600 }}>אין נהגים פעילים באזור זה.</div>
+            ) : (
+              <table style={{ width: "100%", minWidth: 560, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["שם נהג", "טלפון", "הזדמנות"].map((h) => (
+                      <th key={h} style={{ textAlign: "right", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", background: "#f8fafc", fontSize: 12, fontWeight: 900 }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {driversRegionOpen.drivers.map((d) => (
+                    <tr key={d.contactId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ padding: "10px 12px", fontWeight: 700 }}>{d.name || "ללא שם"}</td>
+                      <td style={{ padding: "10px 12px" }}>{d.phone || "—"}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <a
+                          href={`/pipeline?openOpportunityId=${encodeURIComponent(d.opportunityId)}`}
+                          style={{ color: "#4c1d95", fontWeight: 700 }}
+                        >
+                          {d.opportunityName || "הזדמנות"}
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

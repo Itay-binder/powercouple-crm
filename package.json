@@ -12,16 +12,18 @@
     "lint": "next lint",
     "import:powercouple": "node scripts/import-powercouple-opportunities.mjs",
     "migrate:contact-phone": "tsx scripts/migrate-contact-to-phone.ts",
-    "reset:tenant-opportunities": "tsx scripts/reset-tenant-opportunities.ts"
+    "reset:tenant-opportunities": "tsx scripts/reset-tenant-opportunities.ts",
+    "onboard:vladimir-mover": "tsx scripts/onboard-vladimir-mover.ts"
   },
   "dependencies": {
     "@date-fns/tz": "^1.4.1",
     "@opentelemetry/api": "^1.9.0",
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
     "date-fns": "^4.1.0",
-    "firebase": "^12.11.0",
-    "firebase-admin": "^13.7.0",
     "googleapis": "^144.0.0",
     "next": "^15.1.0",
+    "postgres": "^3.4.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "swr": "^2.4.1",

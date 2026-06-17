@@ -23,11 +23,7 @@ export async function GET(req: NextRequest) {
   try {
     const scopeQ = req.nextUrl.searchParams.get("scope");
     const scope: PipelineScope =
-      scopeQ === "moving_order"
-        ? "moving_order"
-        : scopeQ === "property_deal"
-          ? "property_deal"
-          : "opportunity";
+      scopeQ === "moving_order" ? "moving_order" : "opportunity";
     const pipelines = await listPipelines(scope);
     return NextResponse.json({ ok: true, pipelines });
   } catch (e) {
@@ -53,16 +49,10 @@ export async function POST(req: NextRequest) {
       stages?: string[];
       scope?: PipelineScope;
     };
-    const scope: PipelineScope =
-      body.scope === "moving_order"
-        ? "moving_order"
-        : body.scope === "property_deal"
-          ? "property_deal"
-          : "opportunity";
     const created = await createPipeline({
       name: body.name ?? "",
       stages: Array.isArray(body.stages) ? body.stages : [],
-      scope,
+      scope: body.scope === "moving_order" ? "moving_order" : "opportunity",
     });
     return NextResponse.json({ ok: true, pipeline: created });
   } catch (e) {

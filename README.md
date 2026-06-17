@@ -1,19 +1,18 @@
-# Power Couple CRM
+# liftygo CRM (MVP)
 
-מערכת לניהול **קליטת לקוחות** ותהליכי מכירות — מבוססת על אותו ליבה כמו [Itay-binder/CRM](https://github.com/Itay-binder/CRM) (Next.js, Firebase Auth, Firestore, אינטגרציות Google ועוד).
+Liftygo CRM הוא CRM לניהול לידים ואנשי קשר עבור צוותי מכירות.
+הפרויקט בנוי על Next.js, משתמש באימות Google (Firebase Auth) עם הרשאות דרך Firestore (`invites` / `users`),
+ומשתמש ב-Google Sheets כמקור הנתונים של הלידים (ובשלב הבא גם כתיבה/אוטומציות).
 
-## מה כלול (בדומה ל-CRM המקורי)
-
+## מה כלול ב-MVP (שלד)
 - התחברות עם Google (Firebase Auth)
-- הרשאות דרך Firestore: `invites` ו-`users`
-- דשבורד, אנשי קשר, פייפליין, משימות, לוח שנה ופיצ׳רים נוספים לפי ההגדרות במסד
+- הרשאות גישה דרך Firestore: `invites` + `users`
+- מסך `Pending` למשתמש שממתין לאישור
+- Dashboard בסיסי עם מדדים לפי סטטוס + פילטר תאריכים (שליפה מה-Sheets)
+- Contacts בסיסי (טבלה לקריאה מה-Sheets)
+- Pipeline בסיסי לפי עמודת סטטוס בשיטס (קריאה בלבד בינתיים)
+- מסך `שדות מותאמים` (שלד ל-UI, מימוש בהמשך)
 
-## התחלה מהירה
+## הגדרות
+יש להעתיק את `.env.example` ל-`.env` ולהגדיר ערכים מתאימים.
 
-1. העתק `.env.example` ל-`.env`.
-2. מלא את ערכי **פרויקט Firebase חדש** ו-**Google Cloud / Sheets** (פרטים ב-`DEPLOYMENT.md`).
-3. `npm install` ואז `npm run dev`.
-
-## פריסה
-
-הוראות מלאות ל-Vercel, Firebase נפרד ו-Google Cloud: **`DEPLOYMENT.md`**.

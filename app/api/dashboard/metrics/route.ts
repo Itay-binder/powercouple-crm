@@ -1,15 +1,29 @@
+import type { Firestore } from "firebase-admin/firestore";
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
 import { createdAtInYmdRange } from "@/lib/datetime/ymdBoundary";
-import { listPropertyDeals } from "@/lib/deals/repo";
-import type { PropertyDealRecord } from "@/lib/deals/repo";
+import { israelTodayAndTomorrowKeys } from "@/lib/datetime/taskTimestamps";
+import { getAdminDb } from "@/lib/firebase/admin";
+import { listLeadsFiltered } from "@/lib/leads/repo";
+import { assertMovingOrdersWorkspace } from "@/lib/movingOrders/guard";
+import { getCityRegionRows } from "@/lib/movingOrders/cityRegionSettingsRepo";
 import {
-  ensureDefaultPipeline,
+  leadIsMoverPoolMember,
+  mergeLeadAndOpportunity,
+  moverIsNationwide,
+  normHe,
+  readMoverRegionsText,
+} from "@/lib/movingOrders/moverFieldReaders";
+import { countMovingOrdersCreatedInIsraelDay, listMovingOrders } from "@/lib/movingOrders/repo";
+import { getMetaAdsTodaySnapshot } from "@/lib/metaAds/graph";
+import { getMetaAdsConfig } from "@/lib/metaAds/repo";
+import {
   getPayingCustomersPipelineId,
   getPayingCustomersPipelineMeta,
   listOpportunities,
+  type OpportunityRecord,
 } from "@/lib/opportunities/repo";
-import type { OpportunityRecord } from "@/lib/opportunities/repo";
+import { MOVER_OPPORTUNITY_FIELD_IDS } from "@/lib/movingOrders/fieldIds";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,6 +32,8 @@ type ApiOk = {
   ok: true;
   /** הזדמנויות בחלון (כל הפייפליינים) */
   opportunityCount: number;
+  /** הזמנות בחלון */
+  ordersCount: number;
   /** utm_source → ספירת הזדמנויות בחלון */
   leadsByUtmSource: Record<string, number>;
   payingCustomersPipelineId: string;
@@ -28,14 +44,35 @@ type ApiOk = {
   payingCustomersByUtmSource: Record<string, number>;
   /** לקוחות משלמים עם סטטוס פתוח (לא מסונן לפי תאריכים) */
   payingCustomersOpenCount: number;
-  /** עסקות נדל״ן — נוצרו בטווח התאריכים, לפי סטטוס נוכחי */
-  propertyDealsOpenCount: number;
-  propertyDealsPurchaseCount: number;
-  propertyDealsSoldCount: number;
-  /** Power Couple — פייפליין מכירות */
-  salesPipelineId: string;
-  salesPipelineName: string;
-  salesStageCounts: Record<string, number>;
+  /** מוביל → ערך opportunity_leads_count (כמו בעמודת הפייפליין); פעיל = סטטוס פתוח */
+  ordersPerMover: Array<{
+    opportunityId: string;
+    opportunityName: string;
+    orderCount: number;
+    isActive: boolean;
+  }>;
+  activeMoversByRegion: Array<{
+    region: string;
+    activeMoversCount: number;
+    drivers: Array<{
+      contactId: string;
+      name: string;
+      phone: string;
+      opportunityId: string;
+      opportunityName: string;
+    }>;
+  }>;
+  /** הזמנות שנוצרו היום (יום לוח ישראל) — סריקה מוגבלת אם מודול הזמנות פעיל */
+  ordersCreatedTodayIsrael: number;
+  /** Meta Ads — רק אם יש חיבור + טוקן */
+  metaAdsConnected: boolean;
+  metaAdsSpendToday: number | null;
+  metaAdsCurrency: string | null;
+  metaAdsActiveCampaigns: number | null;
+  metaAdsCampaignsWithSpendToday: number | null;
+  metaAdsError?: string;
+  movingOrdersWorkspace: boolean;
+  warning?: string;
 };
 type ApiErr = { ok: false; error: string };
 
@@ -68,31 +105,122 @@ function isPayingCustomerOpen(o: OpportunityRecord): boolean {
   return !o.status || o.status === "פתוח";
 }
 
-/** סיווג סטטוס עסקת נדל״ן לפי ערכי המערכת */
-function propertyDealBucket(status: string | undefined): "open" | "purchase" | "sold" | "ignore" {
-  const t = (status ?? "").trim();
-  if (t === "נמכר") return "sold";
-  if (t === "סיום רכישה") return "purchase";
-  if (t === "בהתאמה" || t === "נחתם" || !t) return "open";
-  return "ignore";
+/** ערך מספרי לשדה opportunity_leads_count (כמו בעמודת הפייפליין). */
+function parseOpportunityLeadsCount(opp: OpportunityRecord): number {
+  const key = MOVER_OPPORTUNITY_FIELD_IDS.leadsCount;
+  const v = opp.customValues?.[key];
+  if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, Math.floor(v));
+  if (typeof v === "string" && v.trim()) {
+    const digits = v.trim().replace(/[^\d]/g, "");
+    if (!digits) return 0;
+    const n = Number.parseInt(digits, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
 }
 
-function countPropertyDealsInRange(
-  deals: PropertyDealRecord[],
-  dateFrom?: string | null,
-  dateTo?: string | null
-): { open: number; purchase: number; sold: number } {
-  let open = 0;
-  let purchase = 0;
-  let sold = 0;
-  for (const d of deals) {
-    if (!createdAtInYmdRange(d.createdAt, dateFrom, dateTo)) continue;
-    const b = propertyDealBucket(d.status);
-    if (b === "open") open++;
-    else if (b === "purchase") purchase++;
-    else if (b === "sold") sold++;
+function buildOrdersPerMover(payingOpportunities: OpportunityRecord[]): Array<{
+  opportunityId: string;
+  opportunityName: string;
+  orderCount: number;
+  isActive: boolean;
+}> {
+  const byCountThenName = (
+    a: { orderCount: number; opportunityName: string },
+    b: { orderCount: number; opportunityName: string }
+  ) => b.orderCount - a.orderCount || a.opportunityName.localeCompare(b.opportunityName, "he");
+
+  const rows = payingOpportunities
+    .filter((opp) => (opp.contactId ?? "").trim())
+    .map((opp) => {
+      const name = (opp.name ?? "").trim() || opp.contactName?.trim() || "ללא שם";
+      return {
+        opportunityId: opp.id,
+        opportunityName: name,
+        orderCount: parseOpportunityLeadsCount(opp),
+        isActive: isPayingCustomerOpen(opp),
+      };
+    });
+
+  rows.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    return byCountThenName(a, b);
+  });
+  return rows;
+}
+
+function normNoSpaces(s: string): string {
+  return normHe(s).replace(/\s+/g, "");
+}
+
+function regionTokenMatch(regionsText: string, regionLabel: string): boolean {
+  const a = normNoSpaces(regionsText);
+  const b = normNoSpaces(regionLabel);
+  if (a.length < 2 || b.length < 2) return false;
+  return a.includes(b);
+}
+
+function buildActiveMoversByRegion(params: {
+  payingOpportunities: OpportunityRecord[];
+  allLeads: Awaited<ReturnType<typeof listLeadsFiltered>>;
+  allRegions: string[];
+}): ApiOk["activeMoversByRegion"] {
+  const { payingOpportunities, allLeads, allRegions } = params;
+  const out = new Map<
+    string,
+    Map<
+      string,
+      {
+        contactId: string;
+        name: string;
+        phone: string;
+        opportunityId: string;
+        opportunityName: string;
+      }
+    >
+  >();
+  for (const region of allRegions) out.set(region, new Map());
+
+  const leadById = new Map(allLeads.map((l) => [l.id, l]));
+
+  for (const opp of payingOpportunities) {
+    if (!isPayingCustomerOpen(opp)) continue;
+    const contactId = (opp.contactId ?? "").trim();
+    if (!contactId) continue;
+    const lead = leadById.get(contactId);
+    if (!lead) continue;
+    if (!leadIsMoverPoolMember(lead)) continue;
+
+    const merged = mergeLeadAndOpportunity(lead, opp);
+    const regionsText = readMoverRegionsText(merged);
+    const nationwide = moverIsNationwide(merged, regionsText);
+
+    const driverRow = {
+      contactId,
+      name: (lead.name ?? opp.contactName ?? opp.name ?? "").trim() || "ללא שם",
+      phone: (lead.phone ?? opp.contactPhone ?? opp.phone ?? "").trim(),
+      opportunityId: opp.id,
+      opportunityName: (opp.name ?? opp.contactName ?? "").trim() || "ללא שם",
+    };
+
+    for (const region of allRegions) {
+      if (!region.trim()) continue;
+      if (!nationwide && !regionTokenMatch(regionsText, region)) continue;
+      const bucket = out.get(region);
+      if (!bucket) continue;
+      bucket.set(contactId, driverRow);
+    }
   }
-  return { open, purchase, sold };
+
+  return allRegions.map((region) => {
+    const rows = Array.from(out.get(region)?.values() ?? []);
+    rows.sort((a, b) => a.name.localeCompare(b.name, "he"));
+    return {
+      region,
+      activeMoversCount: rows.length,
+      drivers: rows,
+    };
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -103,21 +231,13 @@ export async function GET(req: NextRequest) {
   const dateTo = req.nextUrl.searchParams.get("date_to");
 
   try {
-    const [payingPipelineId, payingMeta, allOpportunities, salesPipeline, allDeals] = await Promise.all([
+    const [payingPipelineId, payingMeta, allOpportunities, allLeads, cityRegionRows] = await Promise.all([
       getPayingCustomersPipelineId(),
       getPayingCustomersPipelineMeta(),
       listOpportunities(),
-      ensureDefaultPipeline(),
-      listPropertyDeals(),
+      listLeadsFiltered(),
+      getCityRegionRows(),
     ]);
-
-    const salesOpps = allOpportunities.filter((o) => o.pipelineId === salesPipeline.id);
-    const salesStageCounts: Record<string, number> = {};
-    for (const s of salesPipeline.stages) salesStageCounts[s] = 0;
-    for (const o of salesOpps) {
-      const k = o.stage || "—";
-      salesStageCounts[k] = (salesStageCounts[k] ?? 0) + 1;
-    }
 
     const inRangeAll = opportunitiesInDateRange(allOpportunities, dateFrom, dateTo);
     const payingAll = allOpportunities.filter((o) => o.pipelineId === payingPipelineId);
@@ -127,23 +247,90 @@ export async function GET(req: NextRequest) {
     const leadsByUtmSource = countByUtm(inRangeAll);
     const payingCustomersByUtmSource = countByUtm(payingInRange);
 
-    const dealBuckets = countPropertyDealsInRange(allDeals, dateFrom, dateTo);
+    let ordersCount = 0;
+    let movingOrdersWorkspace = false;
+    let warning: string | undefined;
+
+    const ordersPerMover = buildOrdersPerMover(payingAll);
+    const allRegions = Array.from(
+      new Set(cityRegionRows.map((r) => String(r.region ?? "").trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b, "he"));
+    const activeMoversByRegion = buildActiveMoversByRegion({
+      payingOpportunities: payingAll,
+      allLeads,
+      allRegions,
+    });
+
+    const g = await assertMovingOrdersWorkspace();
+    let ordersDb: Firestore | null = null;
+    if (g.ok) {
+      movingOrdersWorkspace = true;
+      ordersDb = g.db;
+      const orders = await listMovingOrders({
+        db: g.db,
+        dateFrom,
+        dateTo,
+        maxFetch: 10000,
+        resultLimit: null,
+      });
+      ordersCount = orders.length;
+    } else if (g.status !== 403) {
+      warning = g.error;
+    }
+
+    const { today: todayIsrael } = israelTodayAndTomorrowKeys();
+
+    let ordersCreatedTodayIsrael = 0;
+    if (ordersDb) {
+      ordersCreatedTodayIsrael = await countMovingOrdersCreatedInIsraelDay(todayIsrael, {
+        db: ordersDb,
+        maxFetch: 8000,
+      });
+    }
+
+    let metaAdsConnected = false;
+    let metaAdsSpendToday: number | null = null;
+    let metaAdsCurrency: string | null = null;
+    let metaAdsActiveCampaigns: number | null = null;
+    let metaAdsCampaignsWithSpendToday: number | null = null;
+    let metaAdsError: string | undefined;
+
+    const db = await getAdminDb();
+    const metaCfg = await getMetaAdsConfig(db);
+    if (metaCfg?.accessToken && metaCfg.adAccountId) {
+      metaAdsConnected = true;
+      try {
+        const snap = await getMetaAdsTodaySnapshot(metaCfg);
+        metaAdsSpendToday = snap.spendToday;
+        metaAdsCurrency = snap.currency;
+        metaAdsActiveCampaigns = snap.activeCampaigns;
+        metaAdsCampaignsWithSpendToday = snap.campaignsWithSpendToday;
+      } catch (e) {
+        metaAdsError = e instanceof Error ? e.message : "Meta error";
+      }
+    }
 
     const payload: ApiOk = {
       ok: true,
       opportunityCount: inRangeAll.length,
+      ordersCount,
       leadsByUtmSource,
       payingCustomersPipelineId: payingPipelineId,
       payingCustomersPipelineName: payingMeta.name,
       payingCustomersInRangeCount: payingInRange.length,
       payingCustomersByUtmSource,
       payingCustomersOpenCount: payingOpen.length,
-      propertyDealsOpenCount: dealBuckets.open,
-      propertyDealsPurchaseCount: dealBuckets.purchase,
-      propertyDealsSoldCount: dealBuckets.sold,
-      salesPipelineId: salesPipeline.id,
-      salesPipelineName: salesPipeline.name,
-      salesStageCounts,
+      ordersPerMover,
+      activeMoversByRegion,
+      ordersCreatedTodayIsrael,
+      metaAdsConnected,
+      metaAdsSpendToday,
+      metaAdsCurrency,
+      metaAdsActiveCampaigns,
+      metaAdsCampaignsWithSpendToday,
+      ...(metaAdsError ? { metaAdsError } : {}),
+      movingOrdersWorkspace,
+      ...(warning ? { warning } : {}),
     };
     return NextResponse.json(payload);
   } catch (e) {

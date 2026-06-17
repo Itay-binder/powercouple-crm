@@ -278,7 +278,7 @@ function MoverMatchTable({
       <table
         style={{
           width: "100%",
-          minWidth: compact ? 1020 : showOpportunityLinks ? 1360 : 1220,
+          minWidth: compact ? 1180 : showOpportunityLinks ? 1580 : 1420,
           borderCollapse: "collapse",
           background: "#fff",
         }}
@@ -298,11 +298,17 @@ function MoverMatchTable({
             <th style={thStyle}>קטן</th>
             <th style={thStyle}>חירום</th>
             <th style={thStyle}>מנוף</th>
-            <th style={thStyle}>פניות</th>
+            <th style={{ ...thStyle, minWidth: 100, whiteSpace: "normal" }}>
+              כמות לידים שנשלחו בחבילה נוכחית
+            </th>
+            <th style={{ ...thStyle, minWidth: 100, whiteSpace: "normal" }}>
+              כמות לידים שנרכשו בחבילה הנוכחית
+            </th>
+            <th style={{ ...thStyle, minWidth: 88, whiteSpace: "normal" }}>כמות לידים שקיבל היום</th>
             <th style={thStyle}>ליד אחרון שקיבל (תאריך)</th>
             <th style={thStyle}>שעות / גמישות</th>
             <th style={{ ...thStyle, minWidth: 130, whiteSpace: "nowrap" }}>וואטסאפ</th>
-            {showOpportunityLinks ? <th style={thStyle}>לקוחות</th> : null}
+            {showOpportunityLinks ? <th style={thStyle}>הזדמנות</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -364,7 +370,9 @@ function MoverMatchTable({
                 <td style={tdStyle}>{en?.smallMover?.trim() || "—"}</td>
                 <td style={tdStyle}>{en?.sos?.trim() || "—"}</td>
                 <td style={tdStyle}>{en?.crane?.trim() || "—"}</td>
-                <td style={tdStyle}>{en?.leadCount?.trim() || "—"}</td>
+                <td style={tdStyle}>{en?.packageCurrentSentLeads?.trim() ?? "—"}</td>
+                <td style={tdStyle}>{en?.packageCurrentPurchasedLeads?.trim() ?? "—"}</td>
+                <td style={tdStyle}>{en?.dailyLeadsToday?.trim() ?? "—"}</td>
                 <td style={{ ...tdStyle, fontSize: 11 }}>
                   {en?.lastLeadAt ? formatIsraelDateTime(en.lastLeadAt) : "—"}
                 </td>

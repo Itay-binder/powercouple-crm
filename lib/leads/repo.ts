@@ -17,6 +17,7 @@ import { reconcileTasksGoogleCalendar } from "@/lib/googleCalendar/taskSync";
 import { fireServerWebhooks } from "@/lib/webhooks/dispatchServerWebhooks";
 import { listLabelsFromDb, normalizeIncomingLabelIds } from "@/lib/labels/repo";
 import { parseYmdBoundary } from "@/lib/datetime/ymdBoundary";
+import { isoCreatedAtInJerusalemCalendarDay } from "@/lib/datetime/taskTimestamps";
 
 export type LeadRecord = {
   id: string; // doc id = normalized unique key
@@ -87,7 +88,8 @@ export type LeadUpsertInput = {
   updatedAt?: string;
 };
 
-function normalizeUniqueKey(raw: string): string {
+/** מזהה מסמך leads — מנורמל (אימייל lower-case, טלפון כפי שמוחזר מ-normalizePhone). */
+export function normalizeUniqueKey(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
@@ -270,7 +272,7 @@ export async function upsertLead(input: LeadUpsertInput): Promise<LeadRecord> {
           kind: "new_lead",
           title: "ליד חדש ב־CRM",
           body: `${name || "ללא שם"} · ${picked.phone ?? picked.email ?? ""}`.trim().slice(0, 180),
-          relativeUrl: `/contacts/${encodeURIComponent(picked.docId)}`,
+          relativeUrl: `/contacts?openContactId=${encodeURIComponent(picked.docId)}`,
           tag: `lead-${picked.docId}-${Date.now()}`,
         })
       )
@@ -341,6 +343,23 @@ export async function listLeadsFiltered(dateFrom?: string | null, dateTo?: strin
   return leads;
 }
 
+/** ספירת לידים (אנשי קשר) שנוצרו ביום לוח ישראלי — סריקה עד maxFetch אחרונים לפי createdAt */
+export async function countLeadsCreatedInIsraelDay(
+  ymd: string,
+  opts: { maxFetch?: number; db?: FirebaseFirestore.Firestore } = {}
+): Promise<number> {
+  const db = opts.db ?? (await getAdminDb());
+  const maxFetch = Math.min(8000, Math.max(1, opts.maxFetch ?? 4000));
+  const snap = await db.collection("leads").orderBy("createdAt", "desc").limit(maxFetch).get();
+  let n = 0;
+  for (const doc of snap.docs) {
+    const lead = mapDocToLead(doc.id, doc.data() as Record<string, unknown>);
+    if (!lead.createdAt) continue;
+    if (isoCreatedAtInJerusalemCalendarDay(lead.createdAt.toISOString(), ymd)) n += 1;
+  }
+  return n;
+}
+
 /**
  * מוזג labelIds מהזדמנויות לתוך רשומות אנשי הקשר.
  * תגית שמוגדרת על הזדמנות של איש קשר תיחשב גם כתגית של איש הקשר עצמו.
@@ -383,9 +402,9 @@ export async function appendLeadNote(
   input: {
     text: string;
     createdBy?: string;
-    category?: string;
     id?: string;
     createdAt?: string;
+    category?: string;
   }
 ): Promise<LeadRecord> {
   const docId = normalizeUniqueKey(id);
@@ -449,7 +468,6 @@ export async function updateLead(
       text: string;
       createdAt: string;
       createdBy?: string;
-      category?: string;
       attachments?: Array<{ id: string; fileName: string; url: string }>;
     }>;
     tasks?: Array<{
@@ -530,14 +548,7 @@ export async function updateLead(
   if (input.notes !== undefined && Array.isArray(input.notes)) {
     await propagateExactNotesToAllOpportunities(
       docId,
-      input.notes as Array<{
-        id: string;
-        text: string;
-        createdAt: string;
-        createdBy?: string;
-        category?: string;
-        attachments?: Array<{ id: string; fileName: string; url: string }>;
-      }>
+      input.notes as Array<{ id: string; text: string; createdAt: string; createdBy?: string }>
     );
   }
 

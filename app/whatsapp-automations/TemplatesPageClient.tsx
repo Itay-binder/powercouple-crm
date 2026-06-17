@@ -65,6 +65,10 @@ export default function TemplatesPageClient() {
   const [tplHeaderMediaUrl, setTplHeaderMediaUrl] = useState("");
   const [tplFooterText, setTplFooterText] = useState("");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [headerMediaUploading, setHeaderMediaUploading] = useState(false);
+  const [headerMediaUploadErr, setHeaderMediaUploadErr] = useState<string | null>(null);
+  /** null = טרם נטען / לא ידוע; משמש לאימות כותרת מדיה מול Meta App ID */
+  const [metaAppIdPresent, setMetaAppIdPresent] = useState<boolean | null>(null);
 
   const paramSlotCount = countBodyPlaceholders(tplBodyText);
 
@@ -90,12 +94,23 @@ export default function TemplatesPageClient() {
       validateTemplateDraft({
         bodyText: tplBodyText,
         footerText: tplFooterText,
+        category: tplCategory,
         headerFormat: tplHeaderFormat,
         headerText: tplHeaderText,
         headerMediaUrl: tplHeaderMediaUrl,
         buttonRows: buttonRowsForValidation,
+        metaAppIdPresent,
       }),
-    [tplBodyText, tplFooterText, tplHeaderFormat, tplHeaderText, tplHeaderMediaUrl, buttonRowsForValidation]
+    [
+      tplBodyText,
+      tplFooterText,
+      tplCategory,
+      tplHeaderFormat,
+      tplHeaderText,
+      tplHeaderMediaUrl,
+      buttonRowsForValidation,
+      metaAppIdPresent,
+    ]
   );
 
   const hasBlockingValidation = validationIssues.some((i) => i.level === "error");
@@ -132,6 +147,7 @@ export default function TemplatesPageClient() {
     setTplHeaderMediaUrl("");
     setTplFooterText("");
     setEditingTemplateId(null);
+    setHeaderMediaUploadErr(null);
   }
 
   function startEditingTemplate(t: TemplateVm) {
@@ -152,18 +168,66 @@ export default function TemplatesPageClient() {
     setTplHeaderText(t.headerText ?? "");
     setTplHeaderMediaUrl(t.headerMediaUrl ?? "");
     setTplFooterText(t.footerText ?? "");
+    setHeaderMediaUploadErr(null);
+  }
+
+  const headerFileAccept = useMemo(() => {
+    if (tplHeaderFormat === "IMAGE") return "image/jpeg,image/png,image/webp";
+    if (tplHeaderFormat === "VIDEO") return "video/mp4";
+    if (tplHeaderFormat === "DOCUMENT") return "application/pdf,audio/mpeg,audio/mp3,.mp3,.pdf";
+    return "";
+  }, [tplHeaderFormat]);
+
+  async function uploadTemplateHeaderFile(file: File) {
+    if (tplHeaderFormat !== "IMAGE" && tplHeaderFormat !== "VIDEO" && tplHeaderFormat !== "DOCUMENT") {
+      return;
+    }
+    setHeaderMediaUploading(true);
+    setHeaderMediaUploadErr(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", tplHeaderFormat);
+      const res = await fetch("/api/whatsapp/templates/header-media", {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      const j = await parseJson<{ ok?: boolean; url?: string; error?: string }>(res);
+      if (!res.ok || !j.ok || !j.url) {
+        throw new Error(j.error || "העלאת הקובץ נכשלה");
+      }
+      setTplHeaderMediaUrl(j.url);
+    } catch (e) {
+      setHeaderMediaUploadErr(e instanceof Error ? e.message : "העלאה נכשלה");
+    } finally {
+      setHeaderMediaUploading(false);
+    }
   }
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch("/api/whatsapp/templates", { credentials: "include", cache: "no-store" });
-      if (res.status === 401) {
+      const [tRes, sRes] = await Promise.all([
+        fetch("/api/whatsapp/templates", { credentials: "include", cache: "no-store" }),
+        fetch("/api/whatsapp/settings", { credentials: "include", cache: "no-store" }),
+      ]);
+      if (tRes.status === 401) {
         window.location.href = `/login?returnTo=${encodeURIComponent("/whatsapp-automations/templates")}`;
         return;
       }
-      const j = await parseJson<{ ok?: boolean; templates?: TemplateVm[]; error?: string }>(res);
+      if (sRes.ok) {
+        const sj = await parseJson<{ ok?: boolean; config?: { appId?: string } | null }>(sRes);
+        if (sj.ok && sj.config) {
+          setMetaAppIdPresent(Boolean(String(sj.config.appId ?? "").trim()));
+        } else {
+          setMetaAppIdPresent(null);
+        }
+      } else {
+        setMetaAppIdPresent(null);
+      }
+      const j = await parseJson<{ ok?: boolean; templates?: TemplateVm[]; error?: string }>(tRes);
       if (!j.ok) throw new Error(j.error || "שגיאה בטעינה");
       setTemplates(j.templates ?? []);
     } catch (e) {
@@ -357,7 +421,7 @@ export default function TemplatesPageClient() {
           >
             <option value="MARKETING">Marketing</option>
             <option value="UTILITY">Utility</option>
-            <option value="AUTHENTICATION">Authentication</option>
+            <option value="AUTHENTICATION">Authentication (לא נתמך בשליחה מהמסך)</option>
           </select>
           <input
             value={tplLanguage}
@@ -369,8 +433,13 @@ export default function TemplatesPageClient() {
         <div style={{ display: "grid", gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 13 }}>כותרת (אופציונלי)</div>
           <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
-            תמונה / וידאו / מסמך — קישור HTTPS ציבורי (ישמש גם לדוגמה לאישור במטא). לשמע: בחרו &quot;מסמך&quot;
-            וקישור לקובץ אודיו (למשל mp3).
+            תמונה / וידאו / מסמך — אפשר <strong>להעלות קובץ</strong> (נשמר ב־Firebase Storage של ה־CRM) או להדביק קישור HTTPS
+            ציבורי. הקישור/Sample נדרש לאישור במטא. לשמע: בחרו &quot;מסמך&quot; וקובץ mp3 או קישור ישיר.{" "}
+            <strong>לכותרת מדיה</strong> חובה גם <strong>Meta App ID</strong> ב
+            <Link href="/whatsapp-automations/account" style={{ color: "#2563eb", fontWeight: 700 }}>
+              חשבון WhatsApp
+            </Link>{" "}
+            — המערכת מעלה את הקובץ ל־Meta לפני האישור.
           </p>
           <select
             value={tplHeaderFormat}
@@ -401,13 +470,66 @@ export default function TemplatesPageClient() {
             </div>
           ) : null}
           {tplHeaderFormat === "IMAGE" || tplHeaderFormat === "VIDEO" || tplHeaderFormat === "DOCUMENT" ? (
-            <input
-              value={tplHeaderMediaUrl}
-              onChange={(e) => setTplHeaderMediaUrl(e.target.value)}
-              placeholder="https://... (קישור ישיר לקובץ)"
-              dir="ltr"
-              style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }}
-            />
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+                <label
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: 10,
+                    border: "1px solid #93c5fd",
+                    background: headerMediaUploading ? "#f1f5f9" : "#eff6ff",
+                    color: headerMediaUploading ? "#94a3b8" : "#1d4ed8",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    cursor: headerMediaUploading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {headerMediaUploading ? "מעלה…" : "📎 העלה קובץ מהמחשב"}
+                  <input
+                    type="file"
+                    accept={headerFileAccept}
+                    disabled={headerMediaUploading}
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) void uploadTemplateHeaderFile(f);
+                    }}
+                  />
+                </label>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>או הדביקו קישור:</span>
+              </div>
+              {headerMediaUploadErr ? (
+                <div
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: "#fef2f2",
+                    color: "#991b1b",
+                    fontSize: 13,
+                  }}
+                >
+                  {headerMediaUploadErr}
+                </div>
+              ) : null}
+              <input
+                value={tplHeaderMediaUrl}
+                onChange={(e) => setTplHeaderMediaUrl(e.target.value)}
+                placeholder="https://... (קישור ישיר לקובץ — אופציונלי אם העליתם קובץ)"
+                dir="ltr"
+                style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+              {tplHeaderFormat === "IMAGE" && tplHeaderMediaUrl.trim().startsWith("http") ? (
+                <div style={{ marginTop: 4 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={tplHeaderMediaUrl.trim()}
+                    alt=""
+                    style={{ maxHeight: 140, maxWidth: "100%", borderRadius: 10, border: "1px solid #e5e7eb" }}
+                  />
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>

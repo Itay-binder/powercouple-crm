@@ -2,7 +2,7 @@
 /** Service Worker — Web Push ל־CRM. לא מחליף «התראות חירום» מדינתיות; כפוף להגדרות מערכת/דפדפן. */
 self.addEventListener("push", (event) => {
   let data = {
-    title: "Power Couple CRM",
+    title: "Liftygo CRM",
     body: "",
     url: "/",
     tag: "crm",
@@ -26,8 +26,9 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: "/favicon.ico",
-      badge: "/favicon.ico",
+      /** נתיב אייקון מהאפליקציה (Next `app/icon.tsx`) — לא תלוי ב־favicon.ico */
+      icon: "/icon",
+      badge: "/icon",
       tag: uniqueTag,
       renotify: true,
       requireInteraction: true,

@@ -264,6 +264,30 @@ export function readLeadsCount(merged: Record<string, unknown> | undefined): str
   return "0";
 }
 
+function readOpportunityNumericAsString(merged: Record<string, unknown> | undefined, key: string): string {
+  if (!merged) return "0";
+  const v = merged[key];
+  if (typeof v === "number" && Number.isFinite(v)) return String(Math.max(0, Math.floor(v)));
+  if (typeof v === "string" && v.trim()) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return String(Math.max(0, Math.floor(n)));
+  }
+  return "0";
+}
+
+function israelDayKeyNow(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+}
+
+/** קאונטר יומי — רק אם מפתח היום תואם ליום ישראל הנוכחי */
+function readDailyLeadsTodayDisplay(merged: Record<string, unknown> | undefined): string {
+  if (!merged) return "0";
+  const dayKey = String(merged[MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCountDayKey] ?? "").trim();
+  const today = israelDayKeyNow();
+  if (dayKey !== today) return "0";
+  return readOpportunityNumericAsString(merged, MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCount);
+}
+
 /** תאריך ליד אחרון שההזדמנות קיבלה (שדה lastLeadAt על ההזדמנות) */
 export function opportunityLastLeadReceivedIso(opp: OpportunityRecord | undefined): string | null {
   if (!opp?.lastLeadAt) return null;
@@ -273,6 +297,7 @@ export function opportunityLastLeadReceivedIso(opp: OpportunityRecord | undefine
 function latestOpportunityNoteText(opp: OpportunityRecord | undefined): string {
   if (!opp) return "";
   const custom = readStrFirst(opp.customValues as Record<string, unknown> | undefined, [
+    "opportunity_notes",
     MOVER_WELCOME_OPPORTUNITY_FIELD_IDS.notes,
     "opportunity_mover_notes",
     "opportunity_mover_note",
@@ -299,6 +324,15 @@ export function buildMoverEnrichment(
     sos: readImmediateSos(merged) || "—",
     crane: readCrane(merged),
     leadCount: readLeadsCount(merged),
+    packageCurrentSentLeads: readOpportunityNumericAsString(
+      merged,
+      MOVER_OPPORTUNITY_FIELD_IDS.currentPackageSentLeadsCount
+    ),
+    packageCurrentPurchasedLeads: readOpportunityNumericAsString(
+      merged,
+      MOVER_OPPORTUNITY_FIELD_IDS.currentPackageLeadsCount
+    ),
+    dailyLeadsToday: readDailyLeadsTodayDisplay(merged),
     lastLeadAt: opportunityLastLeadReceivedIso(opp),
     flexibleHours: readStrFirst(merged, [
       MOVER_WELCOME_OPPORTUNITY_FIELD_IDS.activityFlexible,

@@ -1,0 +1,39 @@
+# דוח מודעות (מטא) + הזמנות לווצאפ דרך GreenAPI — כל 30 דקות.
+#
+# Secrets (Repo → Settings → Secrets and variables → Actions):
+#   CRM_SITE_URL   — כתובת production ללא סלאש בסוף
+#   CRON_SECRET    — אותו ערך כמו CRON_SECRET ב-Vercel (Bearer)
+#
+# ריבוי tenants: הוסיפו job נוסף עם header:
+#   curl ... -H "x-crm-tenant-database-id: YOUR_DB_ID" ...
+
+name: Meta ads + orders digest (WhatsApp)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping digest endpoint
+        env:
+          CRM_SITE_URL: ${{ secrets.CRM_SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -e
+          if [ -z "${CRM_SITE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::notice::דילוג: הגדר secrets CRM_SITE_URL ו-CRON_SECRET."
+            exit 0
+          fi
+          BASE="${CRM_SITE_URL%/}"
+          curl -sS -f -X POST \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "${BASE}/api/cron/meta-ads-orders-digest-whatsapp"

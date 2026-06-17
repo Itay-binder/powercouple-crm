@@ -131,6 +131,10 @@ export default function AccountPageClient() {
             dir="ltr"
             style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb" }}
           />
+          <p style={{ margin: 0, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+            WABA: מספר ארוך בלבד (ספרות) מ־API Setup — «WhatsApp Business Account ID». לא להחליף עם Phone Number ID
+            שלהלן.
+          </p>
           <input
             value={phoneNumberId}
             onChange={(e) => setPhoneNumberId(e.target.value)}

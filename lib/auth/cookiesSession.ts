@@ -1,24 +1,23 @@
-import { cookies } from "next/headers";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { createServerSupabase } from "@/lib/supabase/server";
 
+// Kept for backwards-compatible imports. With Supabase Auth the session lives in
+// Supabase's own cookies; this constant is no longer the source of truth.
 export const SESSION_COOKIE = "__session";
 
 export function authDisabled(): boolean {
   return process.env.AUTH_DISABLED === "true";
 }
 
-export async function getSessionUser(): Promise<
-  { uid: string; email?: string } | null
-> {
+/** The currently authenticated user (server components / route handlers). */
+export async function getSessionUser(): Promise<{ uid: string; email?: string } | null> {
   if (authDisabled()) return null;
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!sessionCookie) return null;
-
   try {
-    const auth = getAdminAuth();
-    const decoded = await auth.verifySessionCookie(sessionCookie, true);
-    return { uid: decoded.uid, email: decoded.email };
+    const supabase = await createServerSupabase();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+    return { uid: user.id, email: user.email ?? undefined };
   } catch {
     return null;
   }

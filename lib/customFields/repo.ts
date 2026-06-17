@@ -3,7 +3,7 @@ import { getAdminDb, getRequestTenantDatabaseId } from "@/lib/firebase/admin";
 import { invalidateTenantCachePrefix, withTenantTtlCache } from "@/lib/server/tenantMemoryCache";
 import { MOVER_OPPORTUNITY_FIELD_IDS } from "@/lib/movingOrders/fieldIds";
 
-export type CustomFieldEntity = "contact" | "opportunity" | "property_deal" | "moving_order";
+export type CustomFieldEntity = "contact" | "opportunity" | "moving_order";
 export type CustomFieldType =
   | "text"
   | "number"
@@ -57,7 +57,7 @@ function normalizeFieldId(raw: string): string {
 
 function ensureEntityPrefixedFieldId(entityType: CustomFieldEntity, raw: string): string {
   const normalized = normalizeFieldId(raw);
-  const base = normalized.replace(/^(contact|opportunity|opportiunity|property_deal|deal|moving_order)_+/g, "");
+  const base = normalized.replace(/^(contact|opportunity|opportiunity|moving_order)_+/g, "");
   if (!base) return "";
   return `${entityType}_${base}`;
 }
@@ -103,7 +103,8 @@ function moverQuestionnairePriority(fieldId: string): number {
     ["mover_same_day", 10],
     ["leads_count", 11],
     ["package_current_leads_count", 12],
-    ["work_availability_status", 13],
+    ["package_current_leads_count_sent", 13],
+    ["work_availability_status", 14],
   ]);
   return ranks.get(base) ?? Number.MAX_SAFE_INTEGER;
 }
@@ -286,23 +287,30 @@ export async function validateCustomValues(
     out[k] = String(v ?? "");
   }
 
-  /** שדה מערכת בלי חובת רשומה ב-customFields (למשל אחרי התאמת הזמנות) */
-  const leadsKey = MOVER_OPPORTUNITY_FIELD_IDS.leadsCount;
+  /** שדות מערכת — אופציונליים גם בלי רשומה פעילה ב-customFields */
   if (entityType === "opportunity") {
-    if (Object.prototype.hasOwnProperty.call(incoming, leadsKey)) {
-      const raw = incoming[leadsKey];
-      const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
-      if (!Number.isNaN(n) && n >= 0) {
-        out[leadsKey] = Number.isInteger(n) ? n : Math.floor(n);
+    const systemNumericKeys = [
+      MOVER_OPPORTUNITY_FIELD_IDS.leadsCount,
+      MOVER_OPPORTUNITY_FIELD_IDS.currentPackageSentLeadsCount,
+    ];
+    for (const sysKey of systemNumericKeys) {
+      if (Object.prototype.hasOwnProperty.call(incoming, sysKey)) {
+        const raw = incoming[sysKey];
+        const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+        if (!Number.isNaN(n) && n >= 0) {
+          out[sysKey] = Number.isInteger(n) ? n : Math.floor(n);
+        }
+      } else if (
+        previousValues &&
+        Object.prototype.hasOwnProperty.call(previousValues, sysKey) &&
+        !Object.prototype.hasOwnProperty.call(out, sysKey)
+      ) {
+        const pv = previousValues[sysKey];
+        const n = typeof pv === "number" ? pv : Number.parseFloat(String(pv));
+        if (!Number.isNaN(n) && n >= 0) {
+          out[sysKey] = Number.isInteger(n) ? n : Math.floor(n);
+        }
       }
-    } else if (
-      previousValues &&
-      Object.prototype.hasOwnProperty.call(previousValues, leadsKey) &&
-      !Object.prototype.hasOwnProperty.call(out, leadsKey)
-    ) {
-      const pv = previousValues[leadsKey];
-      const n = typeof pv === "number" ? pv : Number.parseFloat(String(pv));
-      if (!Number.isNaN(n) && n >= 0) out[leadsKey] = Number.isInteger(n) ? n : Math.floor(n);
     }
   }
 

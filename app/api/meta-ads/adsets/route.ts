@@ -34,8 +34,8 @@ export async function GET(req: NextRequest) {
         { status: 400 }
       );
     }
-    const datePresetRaw = req.nextUrl.searchParams.get("datePreset")?.trim() ?? "last_7d";
-    const datePreset = ALLOWED_DATE_PRESETS.has(datePresetRaw) ? datePresetRaw : "last_7d";
+    const datePresetRaw = req.nextUrl.searchParams.get("datePreset")?.trim() ?? "today";
+    const datePreset = ALLOWED_DATE_PRESETS.has(datePresetRaw) ? datePresetRaw : "today";
     const adSets = await listAdSets(config, datePreset);
     return NextResponse.json({ ok: true, datePreset, fetchedAt: new Date().toISOString(), adSets });
   } catch (e) {

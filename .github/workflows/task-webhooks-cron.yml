@@ -3,7 +3,7 @@
 # אם רואים עיכובים של עשרות דק׳, הוסיפו שירות חיצוני (למשל cron-job.org) לאותו URL כל דקה.
 #
 # Secrets (Repo → Settings → Secrets and variables → Actions):
-#   CRM_SITE_URL   — כתובת production ללא סלאש בסוף, למשל https://powercouple-crm.vercel.app
+#   CRM_SITE_URL   — כתובת production ללא סלאש בסוף, למשל https://crm-liftygo.vercel.app
 #   CRON_SECRET    — אותו ערך כמו CRON_SECRET ב-Vercel (Bearer)
 
 name: Task webhooks (cron)

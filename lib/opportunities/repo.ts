@@ -13,16 +13,11 @@ import { normalizeIncomingLabelIds } from "@/lib/labels/repo";
 import { ensureMovingOrdersIntakePipeline } from "@/lib/movingOrders/ensureIntakePipeline";
 import { MOVING_ORDERS_INTAKE_PIPELINE_ID } from "@/lib/movingOrders/pipelineConstants";
 import { statusFromStage } from "@/lib/movingOrders/stageSync";
-import { normalizePhone } from "@/lib/leads/repo";
-import {
-  PC_SALES_PIPELINE_NAME,
-  PC_SALES_STAGES,
-  PC_WON_STAGE_LABEL,
-} from "@/lib/product/powercoupleSpec";
+import { normalizePhone, getLeadById, normalizeUniqueKey } from "@/lib/leads/repo";
 
 const PIPELINES_LIST_CACHE_TTL_MS = 45_000;
 
-export type PipelineScope = "opportunity" | "moving_order" | "property_deal";
+export type PipelineScope = "opportunity" | "moving_order";
 
 export type PipelineRecord = {
   id: string;
@@ -64,7 +59,6 @@ export type OpportunityRecord = {
     text: string;
     createdAt: string;
     createdBy?: string;
-    category?: string;
     attachments?: Array<{ id: string; fileName: string; url: string }>;
   }>;
   tasks?: Array<{
@@ -173,10 +167,8 @@ function normalizeStages(stages: string[]): string[] {
   return Array.from(new Set(out));
 }
 
-export function readPipelineScope(d: Record<string, unknown>): PipelineScope {
-  if (d.scope === "moving_order") return "moving_order";
-  if (d.scope === "property_deal") return "property_deal";
-  return "opportunity";
+function readPipelineScope(d: Record<string, unknown>): PipelineScope {
+  return d.scope === "moving_order" ? "moving_order" : "opportunity";
 }
 
 function opportunityStagesByPipelineId(
@@ -209,7 +201,7 @@ export async function getPipelineById(id: string): Promise<PipelineRecord | null
 }
 
 /** Pipeline stage name that triggers win automation (note + customer pipeline opportunity). */
-export const WON_PIPELINE_STAGE_LABEL = PC_WON_STAGE_LABEL;
+export const WON_PIPELINE_STAGE_LABEL = "זכיה";
 
 const CUSTOMERS_PIPELINE_ID = "customers";
 
@@ -308,20 +300,10 @@ function normalizeOpportunityStageByPipeline(
   pipelineId: string,
   stageRaw: unknown
 ): string {
-  let stage = String(stageRaw ?? "").trim();
+  const stage = String(stageRaw ?? "").trim();
   const stages = pipelineStagesById.get(pipelineId) ?? [];
   if (stages.length === 0) return stage || "Pending";
-  /** מיפוי legacy «זכיה» לשלב רכישת דירה בפייפליין החדש */
-  if (normalizeStageLabel(stage) === "זכיה") {
-    const win = stages.find(
-      (s) => normalizeStageLabel(s) === normalizeStageLabel(WON_PIPELINE_STAGE_LABEL)
-    );
-    if (win) return win;
-  }
   if (stage && stages.includes(stage)) return stage;
-  const ns = normalizeStageLabel(stage);
-  const hit = stages.find((s) => normalizeStageLabel(s) === ns);
-  if (hit) return hit;
   return stages[0];
 }
 
@@ -329,57 +311,35 @@ export async function ensureDefaultPipeline(): Promise<PipelineRecord> {
   const db = await getAdminDb();
   const ref = db.collection("pipelines").doc("default-sales");
   const snap = await ref.get();
-  const now = FieldValue.serverTimestamp();
-
   if (!snap.exists) {
+    const now = FieldValue.serverTimestamp();
     await ref.set({
-      name: PC_SALES_PIPELINE_NAME,
-      stages: [...PC_SALES_STAGES],
+      name: "מוקד מכירות",
+      stages: ["Pending", "Contacted", "Proposal Sent", "זכיה", "Closed"],
       scope: "opportunity",
       createdAt: now,
       updatedAt: now,
     });
   } else {
     const d0 = (snap.data() ?? {}) as Record<string, unknown>;
-    let cur = normalizeStages((d0.stages as string[] | undefined) ?? []);
-    cur = cur.map((s) =>
-      normalizeStageLabel(s) === "זכיה" ? WON_PIPELINE_STAGE_LABEL : s
-    );
-    const pick = new Set<string>();
-    const merged: string[] = [];
-    for (const s of PC_SALES_STAGES) {
-      const key = normalizeStageLabel(s);
-      if (!pick.has(key)) {
-        merged.push(s);
-        pick.add(key);
-      }
+    const cur = normalizeStages((d0.stages as string[] | undefined) ?? []);
+    if (!cur.some((s) => normalizeStageLabel(s) === WON_PIPELINE_STAGE_LABEL)) {
+      const insertAt = Math.max(0, cur.length - 1);
+      const next = [...cur.slice(0, insertAt), WON_PIPELINE_STAGE_LABEL, ...cur.slice(insertAt)];
+      await ref.update({
+        stages: normalizeStages(next),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     }
-    for (const s of cur) {
-      const key = normalizeStageLabel(s);
-      if (!pick.has(key)) {
-        merged.push(s);
-        pick.add(key);
-      }
-    }
-    const prevName = String(d0.name ?? "").trim();
-    const nextName =
-      prevName === "מוקד מכירות" || prevName === "" ? PC_SALES_PIPELINE_NAME : prevName;
-    await ref.set(
-      {
-        name: nextName,
-        stages: normalizeStages(merged),
-        updatedAt: now,
-      },
-      { merge: true }
-    );
   }
-
   const again = await ref.get();
   const d = (again.data() ?? {}) as Record<string, unknown>;
   return {
     id: again.id,
-    name: String(d.name ?? PC_SALES_PIPELINE_NAME),
-    stages: normalizeStages((d.stages as string[] | undefined) ?? [...PC_SALES_STAGES]),
+    name: String(d.name ?? "מוקד מכירות"),
+    stages: normalizeStages(
+      (d.stages as string[] | undefined) ?? ["Pending", "Contacted", "Proposal Sent", "זכיה", "Closed"]
+    ),
     scope: readPipelineScope(d),
     createdAt: mapTs(d.createdAt),
     updatedAt: mapTs(d.updatedAt),
@@ -433,12 +393,7 @@ export async function createPipeline(input: CreatePipelineInput): Promise<Pipeli
   if (stages.length === 0) throw new Error("At least one stage is required");
 
   const now = FieldValue.serverTimestamp();
-  const scope: PipelineScope =
-    input.scope === "moving_order"
-      ? "moving_order"
-      : input.scope === "property_deal"
-        ? "property_deal"
-        : "opportunity";
+  const scope: PipelineScope = input.scope ?? "opportunity";
   const ref = await db.collection("pipelines").add({
     name,
     stages,
@@ -499,7 +454,7 @@ export async function listOpportunities(pipelineId?: string | null): Promise<Opp
     snap = await db.collection("opportunities").get();
   }
 
-  const out = snap.docs.map((doc) => {
+  const rows = snap.docs.map((doc) => {
     const d = (doc.data() ?? {}) as Record<string, unknown>;
     return {
       id: doc.id,
@@ -556,6 +511,63 @@ export async function listOpportunities(pipelineId?: string | null): Promise<Opp
       updatedAt: mapTs(d.updatedAt),
     } satisfies OpportunityRecord;
   });
+
+  const uniqueContactIds = Array.from(
+    new Set(rows.map((r) => String(r.contactId ?? "").trim()).filter(Boolean))
+  );
+  const missingLeadIds = new Set<string>();
+  if (uniqueContactIds.length) {
+    const chunkSize = 30;
+    for (let i = 0; i < uniqueContactIds.length; i += chunkSize) {
+      const chunk = uniqueContactIds.slice(i, i + chunkSize);
+      const refs = chunk.map((id) => db.collection("leads").doc(id));
+      const snaps = await db.getAll(...refs);
+      for (const s of snaps) {
+        if (!s.exists) missingLeadIds.add(s.id);
+      }
+    }
+  }
+
+  const out: OpportunityRecord[] = [];
+  const persistContactFixes: Array<{ oppId: string; contactId: string }> = [];
+
+  for (const row of rows) {
+    const cid = String(row.contactId ?? "").trim();
+    let next = row;
+    if (cid && missingLeadIds.has(cid)) {
+      const resolved = await resolveCanonicalContactIdForOpportunity(
+        cid,
+        row.phone ?? row.contactPhone,
+        row.email ?? row.contactEmail
+      );
+      if (resolved && resolved !== cid) {
+        next = { ...row, contactId: resolved };
+        persistContactFixes.push({ oppId: row.id, contactId: resolved });
+      }
+    }
+    out.push(next);
+  }
+
+  if (persistContactFixes.length) {
+    const chunkSize = 400;
+    for (let i = 0; i < persistContactFixes.length; i += chunkSize) {
+      const slice = persistContactFixes.slice(i, i + chunkSize);
+      const batch = db.batch();
+      const now = FieldValue.serverTimestamp();
+      for (const { oppId, contactId } of slice) {
+        batch.set(
+          db.collection("opportunities").doc(oppId),
+          { contactId, updatedAt: now },
+          { merge: true }
+        );
+      }
+      try {
+        await batch.commit();
+      } catch {
+        /* נמשיך לתצוגה גם אם commit נכשל */
+      }
+    }
+  }
 
   return out.sort((a, b) => {
     const at = a.createdAt?.getTime() ?? 0;
@@ -918,6 +930,33 @@ export async function findCustomersPipelineOpportunityByNormalizedPhone(
   return bestId;
 }
 
+/**
+ * כש־contactId על הזדמנות מצביע למסמך leads שנמחק (למשל אחרי מיגרציה מאימייל לטלפון),
+ * אבל יש phone/email על ההזדמנות שמתאימים לליד קיים במזהה הקנוני — מחזיר את מזהה הליד הנכון.
+ */
+export async function resolveCanonicalContactIdForOpportunity(
+  contactId: string,
+  phone?: string | null,
+  email?: string | null
+): Promise<string | null> {
+  const cid = contactId.trim();
+  if (!cid) return null;
+  const existing = await getLeadById(cid);
+  if (existing) return existing.id;
+
+  const nPhone = normalizePhone(phone ?? undefined);
+  if (nPhone) {
+    const byPhone = await getLeadById(normalizeUniqueKey(nPhone));
+    if (byPhone) return byPhone.id;
+  }
+  const em = String(email ?? "").trim().toLowerCase();
+  if (em) {
+    const byEmail = await getLeadById(normalizeUniqueKey(em));
+    if (byEmail) return byEmail.id;
+  }
+  return null;
+}
+
 export async function getOpportunityById(id: string): Promise<OpportunityRecord | null> {
   const db = await getAdminDb();
   const [snap, pipelinesSnap] = await Promise.all([
@@ -1003,7 +1042,6 @@ export async function updateOpportunity(
       text: string;
       createdAt: string;
       createdBy?: string;
-      category?: string;
       attachments?: Array<{ id: string; fileName: string; url: string }>;
     }>;
     tasks?: Array<{
@@ -1346,9 +1384,7 @@ export async function updatePipeline(
       const coll =
         prevScope === "moving_order"
           ? await db.collection("movingOrders").where("pipelineId", "==", id).get()
-          : prevScope === "property_deal"
-            ? await db.collection("property_deals").where("pipelineId", "==", id).get()
-            : await db.collection("opportunities").where("pipelineId", "==", id).get();
+          : await db.collection("opportunities").where("pipelineId", "==", id).get();
       for (const removedStage of removed) {
         const removedIdx = prevStages.indexOf(removedStage);
         let fallback = nextStages[0];
@@ -1363,21 +1399,13 @@ export async function updatePipeline(
         let touched = 0;
         for (const doc of coll.docs) {
           const d = (doc.data() ?? {}) as Record<string, unknown>;
-          const stageVal =
-            prevScope === "property_deal"
-              ? String(d.pipelineStage ?? "")
-              : String(d.stage ?? "");
-          if (stageVal === removedStage) {
+          if (String(d.stage ?? "") === removedStage) {
             const extra: Record<string, unknown> = {
+              stage: fallback,
               updatedAt: FieldValue.serverTimestamp(),
             };
-            if (prevScope === "property_deal") {
-              extra.pipelineStage = fallback;
-            } else {
-              extra.stage = fallback;
-              if (prevScope === "moving_order") {
-                extra.status = statusFromStage(fallback);
-              }
+            if (prevScope === "moving_order") {
+              extra.status = statusFromStage(fallback);
             }
             batch.set(doc.ref, extra, { merge: true });
             touched++;
@@ -1471,11 +1499,6 @@ export async function deletePipeline(id: string): Promise<void> {
     const snap = await db.collection("movingOrders").where("pipelineId", "==", id).limit(1).get();
     if (!snap.empty) {
       throw new Error("Cannot delete pipeline with existing orders");
-    }
-  } else if (scope === "property_deal") {
-    const snap = await db.collection("property_deals").where("pipelineId", "==", id).limit(1).get();
-    if (!snap.empty) {
-      throw new Error("לא ניתן למחוק פייפליין שיש בו עסקאות");
     }
   } else {
     const snap = await db.collection("opportunities").where("pipelineId", "==", id).limit(1).get();

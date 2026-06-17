@@ -18,7 +18,7 @@ export async function fetchPublicSiteTextSnippet(siteUrl: string, maxChars = 350
       redirect: "follow",
       signal: ctrl.signal,
       headers: {
-        "User-Agent": "PowerCoupleSeoAgent/1.0 (+https://www.example.com)",
+        "User-Agent": "LiftygoSeoAgent/1.0 (+https://liftygo.co.il)",
         Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
       },
     });

@@ -2,12 +2,19 @@ import type { LeadRecord } from "@/lib/leads/repo";
 import type { OpportunityRecord } from "@/lib/opportunities/repo";
 import { lookupRegionForSettlement } from "@/lib/movingOrders/cityRegionSettingsRepo";
 import { extractCityHints } from "@/lib/movingOrders/israelCities";
-import { driverWorksOnDay, orderDateToJerusalemWeekdayMarkers } from "@/lib/movingOrders/matchDrivers";
+import {
+  driverWorksOnAllDayGroups,
+  orderDateToJerusalemWeekdayMarkers,
+} from "@/lib/movingOrders/matchDrivers";
 import { resolveOrderMoveKind } from "@/lib/movingOrders/orderMoveKindResolve";
 import { movingOrderDateYmdIsrael } from "@/lib/movingOrders/orderMoveDate";
 import { MOVER_OPPORTUNITY_FIELD_IDS, PAYING_CUSTOMERS_PIPELINE_ID } from "@/lib/movingOrders/fieldIds";
 import { MATCH_ISSUE_MOVER_NOT_ACTIVE_FOR_WORK } from "@/lib/movingOrders/matchInactiveWork";
-import type { DriverMatchFlag, MovingOrderPayload } from "@/lib/movingOrders/types";
+import type {
+  DriverMatchFlag,
+  MovingOrderPayload,
+  MovingOrderStatus,
+} from "@/lib/movingOrders/types";
 import {
   immediateSosIndicatesYes,
   leadIsMoverPoolMember,
@@ -21,6 +28,11 @@ import {
   readSmallMoverAnswerForSmallMoveOrder,
   triStateYesNo,
 } from "@/lib/movingOrders/moverFieldReaders";
+import {
+  isYanivShmuelPayingMover,
+  parseOrderApartmentRoomCount,
+  YANIV_SHMUEL_ROOM_PARTIAL_MATCH_ISSUE_HE,
+} from "@/lib/movingOrders/yanivShmuelRoomMatch";
 
 function combineFlags(a: DriverMatchFlag, b: DriverMatchFlag): DriverMatchFlag {
   if (a === "red" || b === "red") return "red";
@@ -191,6 +203,42 @@ export function dayMarkersFromOrder(
   return orderDateToJerusalemWeekdayMarkers(date);
 }
 
+/**
+ * קבוצות ימים להתאמה: תאריך ההובלה + לכל הזמנה ממתינה שעדיין לא נשלחה התאמה — גם יום הלוח הירושלמי הנוכחי,
+ * כדי שמעבר יום (למשל ה׳→ו׳) יעדכן סטטוס התאמה גם בלי שינוי תאריך בהזמנה.
+ */
+export function dayMarkerGroupsForMatch(
+  cv: Record<string, unknown> | undefined,
+  payload: MovingOrderPayload,
+  ctx: { orderStatus: MovingOrderStatus; sentMatchCount: number }
+): string[][] {
+  const groups: string[][] = [];
+  const label = String(cv?.moving_order_day_order ?? payload.day_order ?? "").trim();
+  if (label) {
+    const m = hebrewDayLabelToMarkers(label);
+    if (m.length) groups.push(m);
+  } else {
+    const date = String(cv?.moving_order_date ?? payload.date ?? "").trim();
+    const moveMarkers = orderDateToJerusalemWeekdayMarkers(date);
+    if (moveMarkers.length) groups.push(moveMarkers);
+  }
+
+  const pendingUnsent = ctx.orderStatus === "pending" && ctx.sentMatchCount === 0;
+  if (pendingUnsent) {
+    const ymdToday = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+    const todayMarkers = orderDateToJerusalemWeekdayMarkers(ymdToday);
+    if (todayMarkers.length) {
+      const dateRaw = String(cv?.moving_order_date ?? payload.date ?? "").trim();
+      const ymdMove = dateRaw ? movingOrderDateYmdIsrael(dateRaw) : "";
+      if (!ymdMove || ymdMove !== ymdToday) {
+        groups.push(todayMarkers);
+      }
+    }
+  }
+
+  return groups;
+}
+
 export function resolveOrderCities(
   payload: MovingOrderPayload,
   cv: Record<string, unknown> | undefined
@@ -275,11 +323,19 @@ function workAvailabilityOk(merged: Record<string, unknown> | undefined): boolea
   return triStateYesNo(raw) === true;
 }
 
+export type YanivShmuelRoomAlert = {
+  opportunityId: string;
+  contactId: string;
+  rooms: number;
+};
+
 export type MatchMoversDetailedResult = {
   matchedDriverIds: string[];
   optionalDriverIds: string[];
   driverMatchFlags: Record<string, DriverMatchFlag>;
   driverMatchIssues: Record<string, string[]>;
+  /** התראות לפתק אוטומטי על הזדמנות יניב שמואל (מעל 3 חדרים בהובלת דירה) */
+  yanivShmuelRoomAlerts?: YanivShmuelRoomAlert[];
 };
 
 /**
@@ -293,7 +349,11 @@ export function matchMoversForOrderDetailed(
   payload: MovingOrderPayload,
   orderCustomValues: Record<string, unknown> | undefined,
   settlementRegionMap: Map<string, string>,
-  manualContactIds: Set<string>
+  manualContactIds: Set<string>,
+  matchCtx: { orderStatus: MovingOrderStatus; sentMatchCount: number } = {
+    orderStatus: "pending",
+    sentMatchCount: 0,
+  }
 ): MatchMoversDetailedResult {
   const pipe = PAYING_CUSTOMERS_PIPELINE_ID.trim();
   const cv = orderCustomValues;
@@ -332,10 +392,15 @@ export function matchMoversForOrderDetailed(
   );
   const moveKind = resolveOrderMoveKind(payload, cv);
   const sosCapabilityRequired = orderRequiresSosCapabilityForMatch(payload, cv, moveKind);
-  const dayMarkers = dayMarkersFromOrder(cv, payload);
+  const dayGroups = dayMarkerGroupsForMatch(cv, payload, {
+    orderStatus: matchCtx.orderStatus,
+    sentMatchCount: matchCtx.sentMatchCount,
+  });
+  const apartmentRooms = parseOrderApartmentRoomCount(cv, payload);
 
   const rows: Array<{ id: string; flag: DriverMatchFlag; name: string }> = [];
   const driverMatchIssues: Record<string, string[]> = {};
+  const yanivShmuelRoomAlerts: YanivShmuelRoomAlert[] = [];
 
   for (const lead of toProcess) {
     const opp = oppByContact.get(lead.id);
@@ -387,11 +452,11 @@ export function matchMoversForOrderDetailed(
       issuesHe.push("דחיפות · SOS");
     }
 
-    if (dayMarkers.length > 0) {
+    if (dayGroups.length > 0) {
       const daysStr = readActivityDaysText(merged);
-      if (!driverWorksOnDay(daysStr, dayMarkers)) {
+      if (!driverWorksOnAllDayGroups(daysStr, dayGroups)) {
         flag = combineFlags(flag, "orange");
-        issuesHe.push("ימי פעילות");
+        issuesHe.push("ימי פעילות (תאריך הובלה / היום)");
       }
     }
 
@@ -418,6 +483,7 @@ export function matchMoversForOrderDetailed(
     optionalDriverIds: [],
     driverMatchFlags,
     driverMatchIssues,
+    yanivShmuelRoomAlerts: yanivShmuelRoomAlerts.length ? yanivShmuelRoomAlerts : undefined,
   };
 }
 

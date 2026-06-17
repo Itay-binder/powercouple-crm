@@ -63,6 +63,34 @@ function serializeOpportunity(opp: OpportunityRecord): NonNullable<MatchWebhookM
   };
 }
 
+function readNumericCustomField(cv: Record<string, unknown> | undefined, key: string): number {
+  if (!cv) return 0;
+  const v = cv[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim()) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
+function israelDayKeyNow(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+}
+
+function nextDailyLeadsCount(
+  cv: Record<string, unknown>,
+  delta: 1 | -1
+): { nextCount: number; todayKey: string } {
+  const countKey = MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCount;
+  const dayKeyField = MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCountDayKey;
+  const todayKey = israelDayKeyNow();
+  const storedDay = String(cv[dayKeyField] ?? "").trim();
+  const base = storedDay === todayKey ? readNumericCustomField(cv, countKey) : 0;
+  const next = Math.max(0, base + delta);
+  return { nextCount: next, todayKey };
+}
+
 /** שדות שטוחים לזיפייר/מייק — בנוסף למערך movers */
 export function flatMatchSendOpportunityFields(movers: MatchWebhookMover[]): Record<string, string | number> {
   const count = movers.length;
@@ -70,6 +98,7 @@ export function flatMatchSendOpportunityFields(movers: MatchWebhookMover[]): Rec
     opportunities_sent_count: count,
     "כמות הזדמנויות": count,
   };
+  const F = MOVER_OPPORTUNITY_FIELD_IDS;
   movers.forEach((m, idx) => {
     const i = idx + 1;
     const opp = m.opportunity;
@@ -82,6 +111,18 @@ export function flatMatchSendOpportunityFields(movers: MatchWebhookMover[]): Rec
     flat[`שם הזדמנות ${i}`] = name;
     flat[`מספר פלאפון הזדמנות ${i}`] = phone;
     flat[`מזהה הזדמנות ${i}`] = id;
+    if (opp?.customValues && typeof opp.customValues === "object") {
+      const cv = opp.customValues as Record<string, unknown>;
+      const totalLeads = readNumericCustomField(cv, F.leadsCount);
+      const packagePurchased = readNumericCustomField(cv, F.currentPackageLeadsCount);
+      const packageSent = readNumericCustomField(cv, F.currentPackageSentLeadsCount);
+      flat[`opportunity_total_leads_count_${i}`] = totalLeads;
+      flat[`opportunity_package_current_leads_purchased_${i}`] = packagePurchased;
+      flat[`opportunity_package_current_leads_sent_${i}`] = packageSent;
+      flat[`כמות פניות כללית למוביל ${i}`] = totalLeads;
+      flat[`כמות לידים בחבילה הנוכחית (שנרכשה) ${i}`] = packagePurchased;
+      flat[`כמות לידים בחבילה הנוכחית (נשלחו) ${i}`] = packageSent;
+    }
   });
   return flat;
 }
@@ -135,30 +176,71 @@ export async function applyMatchSendSideEffects(params: {
 }): Promise<void> {
   const head = `הזמנה: ${params.orderCustomerName} · מזהה הזמנה: ${params.orderId}`;
   const extra = (params.transportNoteLines ?? []).map((x) => String(x).trim()).filter(Boolean);
-  const note = extra.length ? [head, ...extra].join("\n") : head;
   const opps = await listOpportunities(PAYING_CUSTOMERS_PIPELINE_ID);
   const idx = opportunitiesByContactId(opps);
 
   for (const contactId of params.contactIds) {
+    const counterLines: string[] = [];
+    const opp = idx.get(contactId);
+    if (opp) {
+      const cv = { ...(opp.customValues ?? {}) };
+      const totalKey = MOVER_OPPORTUNITY_FIELD_IDS.leadsCount;
+      const sentKey = MOVER_OPPORTUNITY_FIELD_IDS.currentPackageSentLeadsCount;
+      const sizeKey = MOVER_OPPORTUNITY_FIELD_IDS.currentPackageLeadsCount;
+
+      const nextTotal = (Number(cv[totalKey]) || 0) + 1;
+      cv[totalKey] = nextTotal;
+      counterLines.push(
+        `כמות לידים כוללת למוביל (כולל הזמנה זו): ${nextTotal}`
+      );
+      const dailyCountKey = MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCount;
+      const dailyDayKey = MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCountDayKey;
+      const daily = nextDailyLeadsCount(cv, 1);
+      cv[dailyCountKey] = daily.nextCount;
+      cv[dailyDayKey] = daily.todayKey;
+      counterLines.push(`כמות לידים יומית (היום): ${daily.nextCount}`);
+
+      const packageSize = Number(cv[sizeKey]) || 0;
+      let nextSent = (Number(cv[sentKey]) || 0) + 1;
+      let packageReached = false;
+      if (packageSize > 0 && nextSent >= packageSize) {
+        packageReached = true;
+        counterLines.push(
+          `כמות לידים בחבילה הנוכחית: ${nextSent}/${packageSize}`
+        );
+        nextSent = 0;
+        counterLines.push(
+          `החבילה הנוכחית הסתיימה — הקאונטר אופס לאפס לחבילה הבאה`
+        );
+      } else if (packageSize > 0) {
+        counterLines.push(
+          `כמות לידים בחבילה הנוכחית: ${nextSent}/${packageSize}`
+        );
+      } else {
+        counterLines.push(
+          `כמות לידים בחבילה הנוכחית: ${nextSent}`
+        );
+      }
+      cv[sentKey] = nextSent;
+
+      try {
+        await updateOpportunity(opp.id, { customValues: cv, lastLeadAt: new Date() });
+      } catch {
+        /* ignore */
+      }
+      void packageReached;
+    }
+    const noteLines = [head, ...extra, ...counterLines].filter(Boolean);
+    const note = noteLines.join("\n");
     try {
       await appendLeadNote(contactId, { text: note, createdBy: "התאמת הזמנות" });
     } catch {
       /* איש קשר עלול להיות חסר — ממשיכים */
     }
-    const opp = idx.get(contactId);
-    if (!opp) continue;
-    const cv = { ...(opp.customValues ?? {}) };
-    const k = MOVER_OPPORTUNITY_FIELD_IDS.leadsCount;
-    cv[k] = (Number(cv[k]) || 0) + 1;
-    try {
-      await updateOpportunity(opp.id, { customValues: cv, lastLeadAt: new Date() });
-    } catch {
-      /* ignore */
-    }
   }
 }
 
-/** הפחתת מונה פניות (לידים) כשמסירים שליחת התאמה למוביל — לא משנה פתקיות קיימות */
+/** הפחתת מונה פניות (לידים) כשמסירים שליחת התאמה למוביל + רישום הערת זיכוי */
 export async function applyMatchRemoveSideEffects(contactIds: string[]): Promise<void> {
   const ids = [...new Set(contactIds.map((x) => String(x).trim()).filter(Boolean))];
   if (!ids.length) return;
@@ -169,11 +251,38 @@ export async function applyMatchRemoveSideEffects(contactIds: string[]): Promise
     const opp = idx.get(contactId);
     if (!opp) continue;
     const cv = { ...(opp.customValues ?? {}) };
-    const k = MOVER_OPPORTUNITY_FIELD_IDS.leadsCount;
-    const next = Math.max(0, (Number(cv[k]) || 0) - 1);
-    cv[k] = next;
+    const totalKey = MOVER_OPPORTUNITY_FIELD_IDS.leadsCount;
+    const sentKey = MOVER_OPPORTUNITY_FIELD_IDS.currentPackageSentLeadsCount;
+    const sizeKey = MOVER_OPPORTUNITY_FIELD_IDS.currentPackageLeadsCount;
+
+    const nextTotal = Math.max(0, (Number(cv[totalKey]) || 0) - 1);
+    cv[totalKey] = nextTotal;
+    const dailyCountKey = MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCount;
+    const dailyDayKey = MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCountDayKey;
+    const daily = nextDailyLeadsCount(cv, -1);
+    cv[dailyCountKey] = daily.nextCount;
+    cv[dailyDayKey] = daily.todayKey;
+    const nextSent = Math.max(0, (Number(cv[sentKey]) || 0) - 1);
+    cv[sentKey] = nextSent;
+    const packageSize = Number(cv[sizeKey]) || 0;
+
     try {
       await updateOpportunity(opp.id, { customValues: cv });
+    } catch {
+      /* ignore */
+    }
+    const sentLine =
+      packageSize > 0
+        ? `כמות לידים בחבילה הנוכחית (לאחר הזיכוי): ${nextSent}/${packageSize}`
+        : `כמות לידים בחבילה הנוכחית (לאחר הזיכוי): ${nextSent}`;
+    const note = [
+      "זיכוי ליד: הוסרה התאמת הזמנה שנשלחה למוביל.",
+      `כמות לידים כוללת למוביל (לאחר הזיכוי): ${nextTotal}`,
+      `כמות לידים יומית (לאחר הזיכוי): ${daily.nextCount}`,
+      sentLine,
+    ].join("\n");
+    try {
+      await appendLeadNote(contactId, { text: note, createdBy: "זיכוי הזמנה" });
     } catch {
       /* ignore */
     }

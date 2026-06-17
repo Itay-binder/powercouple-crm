@@ -77,7 +77,6 @@ export async function PATCH(
         text: string;
         createdAt: string;
         createdBy?: string;
-        category?: string;
         attachments?: Array<{ id: string; fileName: string; url: string }>;
       }>;
       tasks?: Array<{

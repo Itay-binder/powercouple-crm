@@ -2,7 +2,9 @@ import { getTenantConfigs } from "@/lib/tenant/config";
 
 /**
  * טננטים שבהם מוצג תפריט "ניהול הזמנות" (הובלות).
- * ברירת מחדל: powercouple-customers. ניתן להרחיב ב-CRM_MOVING_ORDERS_TENANT_IDS (מופריד בפסיק).
+ * ברירת מחדל (בלי CRM_MOVING_ORDERS_TENANT_IDS): liftygo-customers + default —
+ * כדי שמצב טננט יחיד (CRM_TENANTS עם id=default) יאפשר קליטת מובילים והזמנות.
+ * ניתן לעקוף ב-CRM_MOVING_ORDERS_TENANT_IDS (מופריד בפסיק).
  */
 export function getMovingOrdersTenantIds(): string[] {
   const raw = process.env.CRM_MOVING_ORDERS_TENANT_IDS?.trim();
@@ -13,7 +15,7 @@ export function getMovingOrdersTenantIds(): string[] {
       .filter(Boolean);
     if (parts.length) return Array.from(new Set(parts));
   }
-  return ["powercouple-customers"];
+  return ["liftygo-customers", "default"];
 }
 
 export function isMovingOrdersTenant(tenantId: string | null | undefined): boolean {

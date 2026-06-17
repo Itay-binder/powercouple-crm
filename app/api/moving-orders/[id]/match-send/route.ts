@@ -63,7 +63,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: "לא נבחרו מובילים" }, { status: 400 });
   }
 
-  const webhookOk = await postMatchSendWebhookForDrivers(g.db, order, driverIds, notifyCustomer);
+  const alreadySent = new Set(order.sentMatchDriverIds ?? []);
+  const newDriverIds = driverIds.filter((id2) => !alreadySent.has(id2));
+  if (newDriverIds.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      webhookPosted: true,
+      skipped: true,
+      reason: "כל המובילים שנבחרו כבר קיבלו שליחה להזמנה זו.",
+      order,
+    });
+  }
 
   const on = orderCustomerName(order);
   const pl = order.payload;
@@ -77,24 +87,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     pl.phone?.trim() ? `טלפון מזמין: ${pl.phone.trim()}` : "",
   ];
   await applyMatchSendSideEffects({
-    contactIds: driverIds,
+    contactIds: newDriverIds,
     orderCustomerName: on,
     orderId: order.orderId,
     transportNoteLines,
   });
+
+  const webhookOk = await postMatchSendWebhookForDrivers(g.db, order, newDriverIds, notifyCustomer);
 
   const dispatchedAt = new Date().toISOString();
   await enqueueMatchSendFollowupWebhook({
     db: g.db,
     movingOrderId: id,
     orderId: order.orderId,
-    driverIds,
+    driverIds: newDriverIds,
     notifyCustomer,
     sentAt: dispatchedAt,
   });
   const updated = await updateMovingOrder(
     id,
-    { stage: MOVING_ORDER_STAGES[1], dispatchedAt, appendSentMatchDriverIds: driverIds },
+    { stage: MOVING_ORDER_STAGES[1], dispatchedAt, appendSentMatchDriverIds: newDriverIds },
     g.db
   );
 

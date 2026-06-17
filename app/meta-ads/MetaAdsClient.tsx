@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatIsraelDateTime } from "@/lib/datetime/formatIsrael";
+import { metaAdSetEligibleForBidCap } from "@/lib/metaAds/graph";
 import type { MetaAdsCampaignVm, MetaAdSetVm, MetaAdVm } from "@/lib/metaAds/graph";
 import CreateCampaignClient from "@/app/meta-ads/CreateCampaignClient";
 import AddAdModal from "@/app/meta-ads/AddAdModal";
@@ -103,6 +104,21 @@ const DATE_PRESETS = [
   { value: "maximum", label: "מקסימום" },
 ];
 
+const DATE_PRESET_SET = new Set(DATE_PRESETS.map((p) => p.value));
+const META_ADS_DATE_PRESET_COOKIE = "crm_meta_ads_date_preset";
+const META_ADS_DATE_PRESET_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = document.cookie.match(new RegExp(`(?:^|; )${esc}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function writeMetaAdsDatePresetCookie(value: string) {
+  document.cookie = `${encodeURIComponent(META_ADS_DATE_PRESET_COOKIE)}=${encodeURIComponent(value)}; path=/; max-age=${META_ADS_DATE_PRESET_COOKIE_MAX_AGE}; SameSite=Lax`;
+}
+
 const TH_STYLE: React.CSSProperties = {
   textAlign: "right",
   padding: "10px 12px",
@@ -132,12 +148,14 @@ export default function MetaAdsClient() {
   const [fetchedAt, setFetchedAt] = useState("");
 
   const [activeTab, setActiveTab] = useState<Tab>("campaigns");
-  const [datePreset, setDatePreset] = useState("last_7d");
+  const [datePreset, setDatePreset] = useState("today");
   const [search, setSearch] = useState("");
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [selectedAdSetId, setSelectedAdSetId] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<string[]>([]);
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
+  const [pendingBidCap, setPendingBidCap] = useState<{ campaignId: string; bidCapShekels: number } | null>(null);
+  const [savingBidCapCampaignId, setSavingBidCapCampaignId] = useState<string | null>(null);
   const [togglePassword, setTogglePassword] = useState("");
   const [statusTogglePasswordInput, setStatusTogglePasswordInput] = useState("");
   const [resettingStatusPassword, setResettingStatusPassword] = useState(false);
@@ -161,6 +179,11 @@ export default function MetaAdsClient() {
       setErr(decodeURIComponent(metaError));
       window.history.replaceState({}, "", "/meta-ads");
     }
+  }, []);
+
+  useEffect(() => {
+    const c = readCookie(META_ADS_DATE_PRESET_COOKIE)?.trim();
+    if (c && DATE_PRESET_SET.has(c)) setDatePreset(c);
   }, []);
 
   const loadSettings = useCallback(async () => {
@@ -219,14 +242,35 @@ export default function MetaAdsClient() {
       parseJson<{ ok?: boolean; ads?: MetaAdVm[]; error?: string }>(aRes),
     ]);
 
-    if (!cRes.ok || !cj.ok) throw new Error(cj.error || "טעינת קמפיינים נכשלה");
-    if (!sRes.ok || !sj.ok) throw new Error(sj.error || "טעינת סדרות מודעות נכשלה");
-    if (!aRes.ok || !aj.ok) throw new Error(aj.error || "טעינת מודעות נכשלה");
+    const partialErrors: string[] = [];
+    if (!cRes.ok || !cj.ok) {
+      setCampaigns([]);
+      setFetchedAt("");
+    } else {
+      setCampaigns(cj.campaigns ?? []);
+      setFetchedAt(cj.fetchedAt ?? "");
+    }
+    if (!sRes.ok || !sj.ok) {
+      setAdSets([]);
+      partialErrors.push(sj.error || "טעינת סדרות מודעות נכשלה");
+    } else {
+      setAdSets(sj.adSets ?? []);
+    }
+    if (!aRes.ok || !aj.ok) {
+      setAds([]);
+      partialErrors.push(aj.error || "טעינת מודעות נכשלה");
+    } else {
+      setAds(aj.ads ?? []);
+    }
 
-    setCampaigns(cj.campaigns ?? []);
-    setAdSets(sj.adSets ?? []);
-    setAds(aj.ads ?? []);
-    setFetchedAt(cj.fetchedAt ?? "");
+    if (!cRes.ok || !cj.ok) {
+      throw new Error(cj.error || "טעינת קמפיינים נכשלה");
+    }
+    if (partialErrors.length > 0) {
+      setErr(partialErrors.join(" · "));
+    } else {
+      setErr(null);
+    }
   }, []);
 
   const loadAll = useCallback(
@@ -426,6 +470,52 @@ export default function MetaAdsClient() {
       togglePassword
     );
     setTogglePassword("");
+  }
+
+  function beginBidCapUpdate(campaignId: string, shekels: number) {
+    if (!Number.isFinite(shekels) || shekels <= 0) {
+      setErr("יש להזין סכום ביד-קאפ חיובי.");
+      return;
+    }
+    setErr(null);
+    setOkMsg(null);
+    setPendingBidCap({ campaignId, bidCapShekels: shekels });
+    setTogglePassword("");
+  }
+
+  async function confirmBidCap() {
+    if (!pendingBidCap) return;
+    if (!togglePassword.trim()) {
+      setErr("יש להזין סיסמת אימות.");
+      return;
+    }
+    const { campaignId, bidCapShekels } = pendingBidCap;
+    setPendingBidCap(null);
+    setErr(null);
+    setOkMsg(null);
+    setSavingBidCapCampaignId(campaignId);
+    try {
+      const res = await fetch(`/api/meta-ads/campaigns/${encodeURIComponent(campaignId)}/bid-cap`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bidCapShekels, password: togglePassword }),
+      });
+      const j = await parseJson<{ ok?: boolean; error?: string; updated?: number }>(res);
+      if (!res.ok || !j.ok) throw new Error(j.error || "עדכון ביד-קאפ נכשל");
+      setOkMsg(
+        j.updated != null
+          ? `ביד-קאפ עודכן ב-${j.updated} סדרות מודעות בקמפיין.`
+          : "ביד-קאפ עודכן."
+      );
+      setTogglePassword("");
+      await loadData(datePreset);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "עדכון ביד-קאפ נכשל");
+      setTogglePassword("");
+    } finally {
+      setSavingBidCapCampaignId(null);
+    }
   }
 
   async function saveStatusTogglePassword(resetToDefault: boolean) {
@@ -870,7 +960,11 @@ export default function MetaAdsClient() {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             <select
               value={datePreset}
-              onChange={(e) => setDatePreset(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDatePreset(v);
+                writeMetaAdsDatePresetCookie(v);
+              }}
               style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 13 }}
             >
               {DATE_PRESETS.map((p) => (
@@ -964,12 +1058,15 @@ export default function MetaAdsClient() {
           ) : activeTab === "campaigns" ? (
             <CampaignsTable
               rows={filteredCampaigns}
+              adSets={adSets}
               selectedId={selectedCampaignId}
               canManage={Boolean(settings?.canManage)}
               togglingIds={togglingIds}
+              savingBidCapCampaignId={savingBidCapCampaignId}
               onToggleStatus={(id, status, effectiveStatus) =>
                 askTogglePassword("campaign", id, status, effectiveStatus)
               }
+              onRequestBidCap={beginBidCapUpdate}
               onRowClick={(id) => { setSelectedCampaignId(id); setSelectedAdSetId(null); setActiveTab("adsets"); }}
             />
           ) : activeTab === "adsets" ? (
@@ -1009,7 +1106,7 @@ export default function MetaAdsClient() {
           }}
         />
       )}
-      {pendingToggle && (
+      {(pendingToggle || pendingBidCap) && (
         <div
           style={{
             position: "fixed",
@@ -1033,9 +1130,13 @@ export default function MetaAdsClient() {
               gap: 10,
             }}
           >
-            <div style={{ fontSize: 16, fontWeight: 900 }}>אימות פעולה</div>
+            <div style={{ fontSize: 16, fontWeight: 900 }}>
+              {pendingBidCap ? "אימות עדכון ביד-קאפ" : "אימות פעולה"}
+            </div>
             <div style={{ fontSize: 13, color: "#6b7280" }}>
-              להזנת הפעלה/כיבוי יש להזין את סיסמת האימות.
+              {pendingBidCap
+                ? "לשינוי ביד-קאפ בכל סדרות המודעות הרלוונטיות בקמפיין יש להזין את סיסמת האימות (אותה סיסמה כמו לכיבוי/הפעלה)."
+                : "להזנת הפעלה/כיבוי יש להזין את סיסמת האימות."}
             </div>
             <input
               value={togglePassword}
@@ -1051,6 +1152,7 @@ export default function MetaAdsClient() {
                 type="button"
                 onClick={() => {
                   setPendingToggle(null);
+                  setPendingBidCap(null);
                   setTogglePassword("");
                 }}
                 style={{
@@ -1066,7 +1168,7 @@ export default function MetaAdsClient() {
               </button>
               <button
                 type="button"
-                onClick={() => void confirmToggleStatus()}
+                onClick={() => (pendingBidCap ? void confirmBidCap() : void confirmToggleStatus())}
                 style={{
                   padding: "8px 12px",
                   borderRadius: 8,
@@ -1126,29 +1228,133 @@ function ToggleStatusButton({
 
 // ── Campaigns Table ────────────────────────────────────────────────────────────
 
+function CampaignBidCapCell({
+  campaignId,
+  adSets,
+  canManage,
+  onRequestUpdate,
+  saving,
+}: {
+  campaignId: string;
+  adSets: MetaAdSetVm[];
+  canManage: boolean;
+  onRequestUpdate: (cid: string, shekels: number) => void;
+  saving: boolean;
+}) {
+  const { eligible, summary, defaultInput } = useMemo(() => {
+    const sets = adSets.filter((s) => s.campaignId === campaignId);
+    const eligible = sets.filter((s) =>
+      metaAdSetEligibleForBidCap({
+        bidStrategy: s.bidStrategy,
+        bidAmountMinor: Math.round(s.bidAmount * 100),
+      })
+    );
+    if (eligible.length === 0) {
+      return { eligible: [] as MetaAdSetVm[], summary: "—", defaultInput: "" };
+    }
+    const amounts = eligible.map((s) => s.bidAmount);
+    const first = amounts[0] ?? 0;
+    const allSame = amounts.every((a) => Math.abs(a - first) < 0.0001);
+    const summary = allSame ? money(first) : `שונות (${eligible.length})`;
+    const defaultInput = String(allSame ? Math.round(first * 100) / 100 : Math.max(...amounts));
+    return { eligible, summary, defaultInput };
+  }, [adSets, campaignId]);
+
+  const [val, setVal] = useState("");
+  useEffect(() => {
+    setVal(defaultInput);
+  }, [defaultInput, campaignId]);
+
+  if (eligible.length === 0) {
+    return (
+      <td
+        style={TD_STYLE}
+        title="מוצג כאשר יש לפחות סדרת מודעות עם ביד-קאפ / עלות יעד ב-Meta"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span style={{ color: "#9ca3af" }}>—</span>
+      </td>
+    );
+  }
+  if (!canManage) {
+    return (
+      <td style={TD_STYLE} onClick={(e) => e.stopPropagation()}>
+        {summary}
+      </td>
+    );
+  }
+  return (
+    <td
+      style={{ ...TD_STYLE, minWidth: 200, verticalAlign: "top" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div style={{ fontSize: 12, marginBottom: 4, color: "#374151" }}>{summary}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+        <input
+          type="number"
+          step={0.01}
+          min={0.01}
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          disabled={saving}
+          dir="ltr"
+          style={{ width: 88, padding: "6px 8px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12 }}
+        />
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => {
+            const n = parseFloat(String(val).replace(",", "."));
+            onRequestUpdate(campaignId, n);
+          }}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid #1d4ed8",
+            background: "#eff6ff",
+            color: "#1d4ed8",
+            fontWeight: 700,
+            fontSize: 12,
+            cursor: saving ? "not-allowed" : "pointer",
+            opacity: saving ? 0.6 : 1,
+          }}
+        >
+          {saving ? "..." : "עדכן"}
+        </button>
+      </div>
+    </td>
+  );
+}
+
 function CampaignsTable({
   rows,
+  adSets,
   selectedId,
   canManage,
   togglingIds,
+  savingBidCapCampaignId,
   onRowClick,
   onToggleStatus,
+  onRequestBidCap,
 }: {
   rows: MetaAdsCampaignVm[];
+  adSets: MetaAdSetVm[];
   selectedId?: string | null;
   canManage: boolean;
   togglingIds: string[];
+  savingBidCapCampaignId?: string | null;
   onRowClick?: (id: string) => void;
   onToggleStatus?: (id: string, status: string, effectiveStatus: string) => void;
+  onRequestBidCap?: (campaignId: string, shekels: number) => void;
 }) {
   if (rows.length === 0)
     return <div style={{ color: "#6b7280" }}>אין קמפיינים להצגה. בדוק חיבור/הרשאות או שנה טווח זמן.</div>;
   return (
     <div style={{ overflow: "auto" }}>
-      <table style={{ width: "100%", minWidth: 1100, borderCollapse: "collapse" }}>
+      <table style={{ width: "100%", minWidth: 1250, borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {["קמפיין", "סטטוס", "פעולה", "מטרה", "תוצאות", "עלות/תוצאה", "הוצאה", "חשיפות", "Reach", "קליקי קישור", "CTR (קישור)", "CPC (קישור)", "תקציב יומי", "תקציב כולל"].map((h) => (
+            {["קמפיין", "סטטוס", "פעולה", "מטרה", "תוצאות", "עלות/תוצאה", "הוצאה", "חשיפות", "Reach", "קליקי קישור", "CTR (קישור)", "CPC (קישור)", "ביד-קאפ (סדרות)", "תקציב יומי", "תקציב כולל"].map((h) => (
               <th key={h} style={TH_STYLE}>{h}</th>
             ))}
           </tr>
@@ -1190,6 +1396,13 @@ function CampaignsTable({
               <td style={TD_STYLE}>{intFmt(c.clicks)}</td>
               <td style={TD_STYLE}>{c.ctr ? `${c.ctr.toFixed(2)}%` : "—"}</td>
               <td style={TD_STYLE}>{c.cpc ? money(c.cpc) : "—"}</td>
+              <CampaignBidCapCell
+                campaignId={c.id}
+                adSets={adSets}
+                canManage={canManage && Boolean(onRequestBidCap)}
+                onRequestUpdate={(cid, n) => onRequestBidCap?.(cid, n)}
+                saving={savingBidCapCampaignId === c.id}
+              />
               <td style={TD_STYLE}>{c.dailyBudget ? money(c.dailyBudget) : "—"}</td>
               <td style={TD_STYLE}>{c.lifetimeBudget ? money(c.lifetimeBudget) : "—"}</td>
             </tr>
@@ -1223,10 +1436,10 @@ function AdSetsTable({
     return <div style={{ color: "#6b7280" }}>אין סדרות מודעות להצגה.</div>;
   return (
     <div style={{ overflow: "auto" }}>
-      <table style={{ width: "100%", minWidth: 1200, borderCollapse: "collapse" }}>
+      <table style={{ width: "100%", minWidth: 1280, borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {["סדרת מודעות", "קמפיין", "סטטוס", "פעולה", "הוסף מודעה", "אופטימיזציה", "תוצאות", "עלות/תוצאה", "הוצאה", "חשיפות", "Reach", "קליקי קישור", "CTR (קישור)", "CPC (קישור)", "CPM", "תקציב"].map((h) => (
+            {["סדרת מודעות", "קמפיין", "סטטוס", "פעולה", "הוסף מודעה", "אופטימיזציה", "ביד-קאפ", "תוצאות", "עלות/תוצאה", "הוצאה", "חשיפות", "Reach", "קליקי קישור", "CTR (קישור)", "CPC (קישור)", "CPM", "תקציב"].map((h) => (
               <th key={h} style={TH_STYLE}>{h}</th>
             ))}
           </tr>
@@ -1284,6 +1497,14 @@ function AdSetsTable({
                 )}
               </td>
               <td style={{ ...TD_STYLE, fontSize: 12, color: "#6b7280" }}>{s.optimizationGoal || "—"}</td>
+              <td
+                style={TD_STYLE}
+                title={
+                  s.bidStrategy ? `אסטרטגיית מחיר: ${s.bidStrategy}` : undefined
+                }
+              >
+                {s.bidAmount > 0 ? money(s.bidAmount) : "—"}
+              </td>
               <td style={{ ...TD_STYLE, fontWeight: 700, color: s.results > 0 ? "#1d4ed8" : undefined }}>{s.results > 0 ? intFmt(s.results) : "—"}</td>
               <td style={TD_STYLE}>{cpr(s.spend, s.results)}</td>
               <td style={{ ...TD_STYLE, fontWeight: 700 }}>{money(s.spend)}</td>

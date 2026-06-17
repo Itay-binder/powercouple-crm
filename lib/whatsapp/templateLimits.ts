@@ -18,10 +18,13 @@ export type TemplateValidationIssue = { level: "error" | "warn"; message: string
 export function validateTemplateDraft(t: {
   bodyText: string;
   footerText?: string;
+  category?: WhatsAppTemplateRecord["category"];
   headerFormat?: WhatsAppTemplateRecord["headerFormat"];
   headerText?: string;
   headerMediaUrl?: string;
   buttonRows?: WhatsAppTemplateButton[];
+  /** כשידוע מההגדרות: false = אין App ID (חובה לכותרת מדיה בשליחה לאישור במטא). null/undefined = לא בודקים */
+  metaAppIdPresent?: boolean | null;
 }): TemplateValidationIssue[] {
   const issues: TemplateValidationIssue[] = [];
   const body = (t.bodyText ?? "").trim();
@@ -45,7 +48,25 @@ export function validateTemplateDraft(t: {
     });
   }
 
+  if (t.category === "AUTHENTICATION") {
+    issues.push({
+      level: "error",
+      message:
+        "קטגוריית Authentication (אימות OTP) אינה נתמכת בשליחה לאישור מהמסך הזה — במטא יש לה מבנה קבוע בלי כותרת תמונה כמו בשאר התבניות. בחרו Utility או Marketing לתבנית עם תמונה, או צרו תבנית Authentication ישירות ב-Meta Business.",
+    });
+  }
+
   const hf = t.headerFormat ?? "NONE";
+  if (
+    (hf === "IMAGE" || hf === "VIDEO" || hf === "DOCUMENT") &&
+    t.metaAppIdPresent === false
+  ) {
+    issues.push({
+      level: "error",
+      message:
+        "לתבנית עם תמונה / וידאו / מסמך בכותרת חובה Meta App ID ב«חשבון WhatsApp» — בלי זה המערכת לא יכולה להעלות את הקובץ ל-Meta לצורך אישור התבנית.",
+    });
+  }
   if (hf === "TEXT") {
     const ht = (t.headerText ?? "").trim();
     if (!ht) {

@@ -2,14 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { formatIsraelDateTime } from "@/lib/datetime/formatIsrael";
+import {
+  naiveLocalInputToStoredIso,
+  utcIsoToJerusalemDatetimeLocal,
+} from "@/lib/datetime/taskTimestamps";
 import {
   columnIntegrationKind,
   InlineFieldShell,
   WhatsAppIconLink,
 } from "@/app/components/InlineFieldShell";
 import { TableCellClamp } from "@/app/components/TableCellClamp";
+import WhatsAppChatPanel from "@/app/components/chat/WhatsAppChatPanel";
+import GreenApiChatPanel from "@/app/components/chat/GreenApiChatPanel";
 
 type LeadsOk = {
   ok: true;
@@ -39,6 +45,79 @@ type AdvOp =
 type AdvLogic = "and" | "or";
 type FieldKind = "text" | "number" | "date" | "select";
 type AdvFilter = { id: string; field: string; op: AdvOp; value: string };
+type NoteItem = {
+  id: string;
+  text: string;
+  createdAt: string;
+  createdBy?: string;
+  attachments?: Array<{ id: string; fileName: string; url: string }>;
+};
+type NotesViewFilter = "all" | "orders" | "tasks" | "calls";
+type TaskItem = {
+  id: string;
+  title: string;
+  dueAt: string;
+  reminderAt?: string;
+  done: boolean;
+  status?: "todo" | "in_progress" | "done";
+  comments?: Array<{ id: string; text: string; createdAt: string }>;
+  createdAt: string;
+  syncToGoogleCalendar?: boolean;
+  googleCalendarId?: string;
+};
+
+function isOrderFlowNote(note: NoteItem): boolean {
+  const by = (note.createdBy ?? "").trim();
+  const txt = (note.text ?? "").trim();
+  if (by === "התאמת הזמנות" || by === "זיכוי הזמנה") return true;
+  return txt.includes("הזמנה:") || txt.includes("זיכוי ליד");
+}
+
+function isTaskFlowNote(note: NoteItem): boolean {
+  const by = (note.createdBy ?? "").trim();
+  const txt = (note.text ?? "").trim();
+  return by.includes("משימה") || txt.includes("משימה");
+}
+
+function isCallsFlowNote(note: NoteItem): boolean {
+  const by = (note.createdBy ?? "").trim();
+  const txt = (note.text ?? "").trim();
+  if (by === "ניהול שיחות") return true;
+  return (
+    txt.includes("שיחה חדשה נקבעה") ||
+    txt.includes("שיחה בוצעה") ||
+    txt.includes("פולואפ שיחה")
+  );
+}
+
+function notePassesFilter(note: NoteItem, filter: NotesViewFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "orders") return isOrderFlowNote(note);
+  if (filter === "calls") return isCallsFlowNote(note);
+  return isTaskFlowNote(note);
+}
+
+type GCalOpt = { id: string; summary?: string; primary?: boolean };
+
+function toLocalInputTask(iso: string): string {
+  return utcIsoToJerusalemDatetimeLocal(String(iso ?? ""));
+}
+function fromLocalInputTask(v: string): string {
+  return naiveLocalInputToStoredIso(v);
+}
+type ContactDetail = {
+  id: string;
+  contactCode?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  status?: "פתוח" | "זכיה" | "הפסד";
+  assignedRep?: string;
+  customFields?: Record<string, unknown>;
+  notes?: NoteItem[];
+  tasks?: TaskItem[];
+};
+
 const BASE_COLS = ["contactCode", "name", "phone", "email", "status", "assignedRep", "createdAt"];
 
 function formatContactTableCell(header: string, value: string): string {
@@ -98,17 +177,8 @@ function asDateKey(raw: string): string | null {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-export type ContactsClientProps = {
-  initialAssigneeScope?: "all" | "mine";
-  canToggleAssigneeScope?: boolean;
-};
-
-export default function ContactsClient({
-  initialAssigneeScope = "all",
-  canToggleAssigneeScope = false,
-}: ContactsClientProps) {
+export default function ContactsClient() {
   const searchParams = useSearchParams();
-  const [assigneeScope, setAssigneeScope] = useState<"all" | "mine">(initialAssigneeScope);
   const [err, setErr] = useState<string | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
@@ -146,17 +216,49 @@ export default function ContactsClient({
 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const router = useRouter();
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<"details" | "notes" | "tasks" | "whatsapp" | "greenapi">("details");
+  const [detailNotesFilter, setDetailNotesFilter] = useState<NotesViewFilter>("all");
+  const [detail, setDetail] = useState<ContactDetail | null>(null);
+  const [savingDetail, setSavingDetail] = useState(false);
+  const openedFromQueryRef = useRef(false);
   const [adminUsers, setAdminUsers] = useState<Array<{ email: string; name?: string }>>([]);
+  const [detailOpportunities, setDetailOpportunities] = useState<
+    Array<{
+      id: string;
+      name: string;
+      pipelineId: string;
+      pipelineName?: string;
+      stage: string;
+      status?: "פתוח" | "זכיה" | "הפסד";
+    }>
+  >([]);
+  const [detailAggNotes, setDetailAggNotes] = useState<NoteItem[]>([]);
+  const [detailAggTasks, setDetailAggTasks] = useState<TaskItem[]>([]);
+  const [newContactNoteText, setNewContactNoteText] = useState("");
+  const [newContactNoteFiles, setNewContactNoteFiles] = useState<File[]>([]);
+  const [noteUploading, setNoteUploading] = useState(false);
+  const [contactTaskModal, setContactTaskModal] = useState<
+    null | { mode: "new" } | { mode: "edit"; task: TaskItem }
+  >(null);
+  const [ctTaskTitle, setCtTaskTitle] = useState("");
+  const [ctTaskDue, setCtTaskDue] = useState("");
+  const [ctTaskRem, setCtTaskRem] = useState("");
+  const [ctTaskStatus, setCtTaskStatus] = useState<"todo" | "in_progress" | "done">("todo");
+  const [ctTaskNote, setCtTaskNote] = useState("");
+  const [gcalLoading, setGcalLoading] = useState(false);
+  const [gcalConnected, setGcalConnected] = useState(false);
+  const [gcalList, setGcalList] = useState<GCalOpt[]>([]);
+  const [ctSyncGcal, setCtSyncGcal] = useState(false);
+  const [ctGcalCalId, setCtGcalCalId] = useState("primary");
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (dateFrom.trim()) params.set("date_from", dateFrom.trim());
     if (dateTo.trim()) params.set("date_to", dateTo.trim());
-    if (assigneeScope === "mine") params.set("mine", "1");
     const q = params.toString();
     return q ? `?${q}` : "";
-  }, [dateFrom, dateTo, assigneeScope]);
+  }, [dateFrom, dateTo]);
 
   const contactsKey = `/api/contacts${query}`;
 
@@ -218,10 +320,13 @@ export default function ContactsClient({
   }, [contactsPayload]);
 
   useEffect(() => {
+    if (openedFromQueryRef.current) return;
     const openContactId = searchParams.get("openContactId")?.trim();
     if (!openContactId) return;
-    router.replace(`/contacts/${encodeURIComponent(openContactId)}`);
-  }, [searchParams, router]);
+    openedFromQueryRef.current = true;
+    void openDetailById(openContactId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     void (async () => {
@@ -238,6 +343,77 @@ export default function ContactsClient({
       } catch {}
     })();
   }, []);
+
+  useEffect(() => {
+    if (!contactTaskModal) return;
+    if (contactTaskModal.mode === "new") {
+      setCtTaskTitle("");
+      setCtTaskDue("");
+      setCtTaskRem("");
+      setCtTaskStatus("todo");
+      setCtTaskNote("");
+      return;
+    }
+    const t = contactTaskModal.task;
+    setCtTaskTitle(t.title);
+    setCtTaskDue(toLocalInputTask(t.dueAt));
+    setCtTaskRem(toLocalInputTask(t.reminderAt ?? ""));
+    setCtTaskStatus((t.status ?? (t.done ? "done" : "todo")) as "todo" | "in_progress" | "done");
+    setCtTaskNote("");
+  }, [contactTaskModal]);
+
+  useEffect(() => {
+    if (!contactTaskModal) return;
+    let cancelled = false;
+    void (async () => {
+      setGcalLoading(true);
+      try {
+        const stRes = await fetch("/api/google-calendar/status", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        const st = (await stRes.json().catch(() => ({}))) as {
+          ok?: boolean;
+          connected?: boolean;
+        };
+        const connected = Boolean(stRes.ok && st.ok && st.connected);
+        let cals: GCalOpt[] = [];
+        if (connected) {
+          const cRes = await fetch("/api/google-calendar/calendars", {
+            credentials: "include",
+            cache: "no-store",
+          });
+          const cj = (await cRes.json().catch(() => ({}))) as { ok?: boolean; calendars?: GCalOpt[] };
+          if (cRes.ok && cj.ok) cals = cj.calendars ?? [];
+        }
+        if (cancelled) return;
+        setGcalConnected(connected);
+        setGcalList(cals);
+        const defaultCal =
+          cals.find((c) => c.primary)?.id ?? cals[0]?.id ?? "primary";
+        if (contactTaskModal.mode === "new") {
+          setCtSyncGcal(connected);
+          setCtGcalCalId(defaultCal);
+        } else {
+          const t = contactTaskModal.task;
+          setCtSyncGcal(Boolean(t.syncToGoogleCalendar));
+          const stored = String(t.googleCalendarId ?? "").trim();
+          setCtGcalCalId(stored || defaultCal);
+        }
+      } catch {
+        if (!cancelled) {
+          setGcalConnected(false);
+          setGcalList([]);
+          setCtSyncGcal(false);
+        }
+      } finally {
+        if (!cancelled) setGcalLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contactTaskModal]);
 
   const adminLabelByEmail = useMemo(() => {
     const map = new Map<string, string>();
@@ -503,6 +679,66 @@ export default function ContactsClient({
     }
   }
 
+  async function openDetailById(id: string) {
+    setErr(null);
+    try {
+      const res = await fetch(`/api/contacts/${encodeURIComponent(id)}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        lead?: ContactDetail;
+        opportunities?: Array<{
+          id: string;
+          name: string;
+          pipelineId: string;
+          pipelineName?: string;
+          stage: string;
+          status?: "פתוח" | "זכיה" | "הפסד";
+        }>;
+        aggregatedNotes?: NoteItem[];
+        aggregatedTasks?: TaskItem[];
+      };
+      if (!res.ok || !j.ok || !j.lead) throw new Error(j.error ?? "טעינת איש קשר נכשלה");
+      setDetail(j.lead);
+      setDetailOpportunities(j.opportunities ?? []);
+      setDetailAggNotes(j.aggregatedNotes ?? []);
+      setDetailAggTasks(j.aggregatedTasks ?? []);
+      setDetailTab("details");
+      setDetailOpen(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "טעינת איש קשר נכשלה");
+    }
+  }
+
+  async function saveDetail(next: Partial<ContactDetail>) {
+    if (!detail) return;
+    setSavingDetail(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/contacts/${encodeURIComponent(detail.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        lead?: ContactDetail;
+      };
+      if (!res.ok || !j.ok || !j.lead) throw new Error(j.error ?? "שמירה נכשלה");
+      setDetail(j.lead);
+      await mutateContacts();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "שמירה נכשלה");
+    } finally {
+      setSavingDetail(false);
+    }
+  }
+
   async function importCsv(file: File) {
     setImporting(true);
     setImportResult(null);
@@ -595,42 +831,6 @@ export default function ContactsClient({
         >
           {filteredRows.length} / {count}
         </span>
-
-        {canToggleAssigneeScope ? (
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#6b7280" }}>תצוגה:</span>
-            <button
-              type="button"
-              onClick={() => setAssigneeScope("all")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 10,
-                border: assigneeScope === "all" ? "2px solid #6d28d9" : "1px solid #e5e7eb",
-                background: assigneeScope === "all" ? "#f5f3ff" : "#fff",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              כל הלקוחות
-            </button>
-            <button
-              type="button"
-              onClick={() => setAssigneeScope("mine")}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 10,
-                border: assigneeScope === "mine" ? "2px solid #6d28d9" : "1px solid #e5e7eb",
-                background: assigneeScope === "mine" ? "#f5f3ff" : "#fff",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              הלקוחות שלי
-            </button>
-          </div>
-        ) : assigneeScope === "mine" ? (
-          <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>הלקוחות שלי בלבד</span>
-        ) : null}
 
         <div style={{ flex: 1 }} />
 
@@ -897,7 +1097,7 @@ export default function ContactsClient({
                             {h === "name" && row.id ? (
                               <button
                                 type="button"
-                                onClick={() => router.push(`/contacts/${encodeURIComponent(String(row.id))}`)}
+                                onClick={() => void openDetailById(String(row.id))}
                                 style={{
                                   border: "none",
                                   background: "transparent",
@@ -1278,6 +1478,649 @@ export default function ContactsClient({
         </div>
       )}
 
+      {detailOpen && detail && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 95 }}>
+          <div
+            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.25)" }}
+            onMouseDown={() => setDetailOpen(false)}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: "min(920px, 96vw)",
+              maxHeight: "92vh",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 16,
+              boxShadow: "12px 0 30px rgba(0,0,0,0.08)",
+              padding: 16,
+              overflow: "auto",
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>
+                {detail.name || detail.email || detail.phone || detail.id}
+              </h3>
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                onClick={() => setDetailOpen(false)}
+                style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 10, padding: "6px 10px", cursor: "pointer" }}
+              >
+                סגור
+              </button>
+            </div>
+
+            <div style={{ marginTop: 10, display: "inline-flex", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+              {(["details", "notes", "tasks", "whatsapp", "greenapi"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setDetailTab(t)}
+                  style={{
+                    border: "none",
+                    background: detailTab === t ? "#ede9fe" : "#fff",
+                    padding: "8px 10px",
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
+                >
+                  {t === "details" ? "פרטים" : t === "notes" ? "פתקים" : t === "tasks" ? "משימות" : t === "whatsapp" ? "WhatsApp" : "GreenAPI"}
+                </button>
+              ))}
+            </div>
+
+            {detailTab === "details" && (
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                <input value={detail.name ?? ""} onChange={(e) => setDetail((d) => (d ? { ...d, name: e.target.value } : d))} placeholder="שם" style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    value={detail.phone ?? ""}
+                    onChange={(e) => setDetail((d) => (d ? { ...d, phone: e.target.value } : d))}
+                    placeholder="טלפון"
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e5e7eb",
+                    }}
+                  />
+                  {detail.phone?.trim() ? <WhatsAppIconLink phone={detail.phone} size={18} /> : null}
+                </div>
+                <input value={detail.email ?? ""} onChange={(e) => setDetail((d) => (d ? { ...d, email: e.target.value } : d))} placeholder="אימייל" style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }} />
+                <select value={detail.status ?? "פתוח"} onChange={(e) => setDetail((d) => (d ? { ...d, status: e.target.value as "פתוח" | "זכיה" | "הפסד" } : d))} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+                  {["פתוח", "זכיה", "הפסד"].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <select value={detail.assignedRep ?? ""} onChange={(e) => setDetail((d) => (d ? { ...d, assignedRep: e.target.value } : d))} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+                  <option value="">Unassigned</option>
+                  {adminUsers.map((u) => (
+                    <option key={u.email} value={u.email}>{u.name?.trim() || u.email}</option>
+                  ))}
+                </select>
+                <div style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 8 }}>
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>הזדמנויות פתוחות תחת איש קשר</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {detailOpportunities.length === 0 ? (
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>אין הזדמנויות פתוחות כרגע</span>
+                    ) : (
+                      detailOpportunities.map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => {
+                            window.location.href = `/pipeline?openOpportunityId=${encodeURIComponent(o.id)}`;
+                          }}
+                          style={{
+                            border: "1px solid #e5e7eb",
+                            borderRadius: 12,
+                            padding: "6px 10px",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            background: "#fff",
+                            cursor: "pointer",
+                            textAlign: "right",
+                          }}
+                          title="פתח הזדמנות"
+                        >
+                          {o.name} · {o.pipelineName || o.pipelineId} · {o.stage} · {o.status ?? "פתוח"}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingDetail}
+                  onClick={() =>
+                    void saveDetail({
+                      name: detail.name ?? "",
+                      phone: detail.phone ?? "",
+                      email: detail.email ?? "",
+                      status: detail.status ?? "פתוח",
+                      assignedRep: detail.assignedRep ?? "",
+                      customFields: detail.customFields ?? {},
+                    })
+                  }
+                  style={{ padding: "9px 12px", borderRadius: 10, border: "none", background: "linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%)", color: "#fff", fontWeight: 800, cursor: "pointer" }}
+                >
+                  {savingDetail ? "שומר..." : "שמור שינויים"}
+                </button>
+              </div>
+            )}
+
+            {detailTab === "notes" && (
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {([
+                    { id: "all", label: "כל ההערות" },
+                    { id: "orders", label: "הזמנות / זיכוי" },
+                    { id: "tasks", label: "הערות משימות" },
+                    { id: "calls", label: "ניהול שיחות" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setDetailNotesFilter(opt.id)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        border: "1px solid #e5e7eb",
+                        background: detailNotesFilter === opt.id ? "#ede9fe" : "#fff",
+                        color: detailNotesFilter === opt.id ? "#5b21b6" : "#374151",
+                        fontWeight: 700,
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {(detail.notes ?? [])
+                  .filter((n) => notePassesFilter(n, detailNotesFilter))
+                  .map((n) => (
+                  <div key={n.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
+                    <div
+                      style={{
+                        marginBottom: 8,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: "#111827",
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "baseline",
+                        gap: "4px 10px",
+                      }}
+                    >
+                      <span style={{ color: "#4b5563", fontWeight: 600 }}>תאריך (ב-CRM):</span>
+                      <span dir="ltr">{formatIsraelDateTime(n.createdAt)}</span>
+                      <span style={{ color: "#6b7280", fontWeight: 500 }}>
+                        · {n.createdBy ?? "משתמש CRM"}
+                      </span>
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{n.text}</div>
+                    {(n.attachments ?? []).length > 0 ? (
+                      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {(n.attachments ?? []).map((a) => (
+                          <a
+                            key={a.id}
+                            href={a.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}
+                          >
+                            📎 {a.fileName}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                {(detailAggNotes ?? [])
+                  .filter((n) => notePassesFilter(n, detailNotesFilter))
+                  .map((n) => (
+                  <div key={`agg-${n.id}`} style={{ border: "1px dashed #cbd5e1", borderRadius: 10, padding: 10, background: "#f8fafc" }}>
+                    <div
+                      style={{
+                        marginBottom: 8,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: "#111827",
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "baseline",
+                        gap: "4px 10px",
+                      }}
+                    >
+                      <span style={{ color: "#4b5563", fontWeight: 600 }}>תאריך (ב-CRM):</span>
+                      <span dir="ltr">{formatIsraelDateTime(n.createdAt)}</span>
+                      <span style={{ color: "#6b7280", fontWeight: 500 }}>
+                        · {n.createdBy ?? "משתמש CRM"}
+                      </span>
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{n.text}</div>
+                    {(n.attachments ?? []).length > 0 ? (
+                      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {(n.attachments ?? []).map((a) => (
+                          <a
+                            key={a.id}
+                            href={a.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}
+                          >
+                            📎 {a.fileName}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+                {(detail.notes ?? []).filter((n) => notePassesFilter(n, detailNotesFilter)).length === 0 &&
+                (detailAggNotes ?? []).filter((n) => notePassesFilter(n, detailNotesFilter)).length === 0 ? (
+                  <div style={{ color: "#6b7280", fontSize: 13 }}>אין הערות להצגה לפי הסינון שנבחר.</div>
+                ) : null}
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => setNewContactNoteFiles(Array.from(e.target.files ?? []))}
+                  style={{ fontSize: 12 }}
+                />
+                {newContactNoteFiles.length > 0 ? (
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>
+                    {newContactNoteFiles.map((f) => f.name).join(", ")}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={noteUploading}
+                  onClick={() => {
+                    void (async () => {
+                      const text = newContactNoteText.trim();
+                      if (!text && newContactNoteFiles.length === 0) return;
+                      setNoteUploading(true);
+                      setErr(null);
+                      try {
+                        const attachments: Array<{ id: string; fileName: string; url: string }> = [];
+                        for (const f of newContactNoteFiles) {
+                          const fd = new FormData();
+                          fd.set("file", f);
+                          const res = await fetch("/api/uploads/note-attachment", {
+                            method: "POST",
+                            body: fd,
+                            credentials: "include",
+                          });
+                          const j = (await res.json().catch(() => ({}))) as {
+                            ok?: boolean;
+                            error?: string;
+                            attachment?: { id: string; fileName: string; url: string };
+                          };
+                          if (!res.ok || !j.ok || !j.attachment) {
+                            throw new Error(j.error ?? "העלאת קובץ נכשלה");
+                          }
+                          attachments.push(j.attachment);
+                        }
+                        const noteText = text || (attachments.length ? "מסמך מצורף" : "");
+                        const notes = [
+                          ...(detail.notes ?? []),
+                          {
+                            id: crypto.randomUUID(),
+                            text: noteText,
+                            createdAt: new Date().toISOString(),
+                            createdBy: "CRM User",
+                            ...(attachments.length ? { attachments } : {}),
+                          },
+                        ];
+                        setDetail((d) => (d ? { ...d, notes } : d));
+                        setNewContactNoteText("");
+                        setNewContactNoteFiles([]);
+                        void saveDetail({ notes });
+                      } catch (e) {
+                        setErr(e instanceof Error ? e.message : "הוספת פתק נכשלה");
+                      } finally {
+                        setNoteUploading(false);
+                      }
+                    })();
+                  }}
+                  style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
+                >
+                  {noteUploading ? "מעלה..." : "+ הוסף פתק"}
+                </button>
+                <textarea
+                  value={newContactNoteText}
+                  onChange={(e) => setNewContactNoteText(e.target.value)}
+                  placeholder="כתוב פתק חדש..."
+                  style={{ minHeight: 120, padding: "10px 12px", borderRadius: 10, border: "1px solid #e5e7eb", lineHeight: 1.55 }}
+                />
+              </div>
+            )}
+
+            {detailTab === "tasks" && (
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                {(detail.tasks ?? []).map((t) => (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e5e7eb",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean((t.status ?? (t.done ? "done" : "todo")) === "done")}
+                      onChange={(e) => {
+                        const tasks = (detail.tasks ?? []).map((x) =>
+                          x.id === t.id
+                            ? {
+                                ...x,
+                                done: e.target.checked,
+                                status: (e.target.checked ? "done" : "todo") as "done" | "todo",
+                              }
+                            : x
+                        );
+                        setDetail((d) => (d ? { ...d, tasks } : d));
+                        void saveDetail({ tasks });
+                      }}
+                    />
+                    <span style={{ fontWeight: 700, flex: 1, minWidth: 120 }}>{t.title}</span>
+                    <span style={{ color: "#6b7280", fontSize: 12 }}>{t.dueAt ? formatIsraelDateTime(t.dueAt) : "—"}</span>
+                    {t.reminderAt ? (
+                      <span style={{ color: "#7c3aed", fontSize: 11 }}>תזכורת: {formatIsraelDateTime(t.reminderAt)}</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setContactTaskModal({ mode: "edit", task: t })}
+                      style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 12 }}
+                    >
+                      ערוך
+                    </button>
+                  </div>
+                ))}
+                {(detailAggTasks ?? []).map((t) => (
+                  <div
+                    key={`agg-${t.id}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px dashed #cbd5e1",
+                      background: "#f8fafc",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <input type="checkbox" checked={Boolean((t.status ?? (t.done ? "done" : "todo")) === "done")} readOnly />
+                    <span style={{ fontWeight: 700 }}>{t.title}</span>
+                    <span style={{ color: "#6b7280", fontSize: 12 }}>{t.dueAt ? formatIsraelDateTime(t.dueAt) : "—"}</span>
+                    {t.reminderAt ? (
+                      <span style={{ color: "#7c3aed", fontSize: 11 }}>תזכורת: {formatIsraelDateTime(t.reminderAt)}</span>
+                    ) : null}
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>מהזדמנות (קריאה בלבד)</span>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setContactTaskModal({ mode: "new" })}
+                  style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
+                >
+                  + הוסף משימה
+                </button>
+              </div>
+            )}
+            {detailTab === "whatsapp" && (
+              <div style={{ marginTop: 12 }}>
+                <WhatsAppChatPanel phone={detail.phone ?? ""} />
+              </div>
+            )}
+            {detailTab === "greenapi" && (
+              <div style={{ marginTop: 12 }}>
+                <GreenApiChatPanel phone={detail.phone ?? ""} />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {contactTaskModal && detail && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onMouseDown={() => setContactTaskModal(null)}
+        >
+          <div
+            style={{
+              width: "min(440px, 94vw)",
+              background: "#fff",
+              borderRadius: 16,
+              border: "1px solid #e5e7eb",
+              padding: 16,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.12)",
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 12px", fontSize: 17, fontWeight: 900 }}>
+              {contactTaskModal.mode === "new" ? "משימה חדשה" : "עריכת משימה"}
+            </h3>
+            <div style={{ display: "grid", gap: 8 }}>
+              <input
+                value={ctTaskTitle}
+                onChange={(e) => setCtTaskTitle(e.target.value)}
+                placeholder="כותרת"
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+              {contactTaskModal.mode === "new" ? (
+                <>
+                  <label style={{ fontWeight: 700, fontSize: 12 }}>הערה לפתקים (אופציונלי)</label>
+                  <textarea
+                    value={ctTaskNote}
+                    onChange={(e) => setCtTaskNote(e.target.value)}
+                    placeholder="הערה שתתווסף לפתקים של איש הקשר/הזדמנות מקושרת..."
+                    style={{
+                      minHeight: 90,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e5e7eb",
+                      lineHeight: 1.5,
+                    }}
+                  />
+                </>
+              ) : null}
+              <label style={{ fontWeight: 700, fontSize: 12 }}>דדליין (אופציונלי)</label>
+              <input
+                type="datetime-local"
+                value={ctTaskDue}
+                onChange={(e) => setCtTaskDue(e.target.value)}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+              <label style={{ fontWeight: 700, fontSize: 12 }}>תזכורת (אופציונלי)</label>
+              <input
+                type="datetime-local"
+                value={ctTaskRem}
+                onChange={(e) => setCtTaskRem(e.target.value)}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+              {gcalLoading ? (
+                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>בודק חיבור ל-Google Calendar...</p>
+              ) : gcalConnected ? (
+                <div
+                  style={{
+                    border: "1px solid #e9d5ff",
+                    borderRadius: 12,
+                    padding: 10,
+                    background: "#faf5ff",
+                  }}
+                >
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={ctSyncGcal}
+                      onChange={(e) => setCtSyncGcal(e.target.checked)}
+                    />
+                    סנכרן ל-Google Calendar
+                  </label>
+                  <p style={{ margin: "6px 0 8px", fontSize: 11, color: "#6b7280" }}>
+                    נדרש דדליין. האירוע ייקבע לפי הדדליין; אם יש תזכורת — תופיע התראה ב-Google לפני הדדליין.
+                  </p>
+                  <label style={{ fontWeight: 700, fontSize: 12 }}>לוח יעד</label>
+                  <select
+                    value={ctGcalCalId}
+                    onChange={(e) => setCtGcalCalId(e.target.value)}
+                    style={{
+                      width: "100%",
+                      marginTop: 4,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e5e7eb",
+                    }}
+                  >
+                    {gcalList.length === 0 ? (
+                      <option value="primary">ראשי (primary)</option>
+                    ) : (
+                      gcalList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {(c.summary ?? c.id) + (c.primary ? " ★" : "")}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              ) : (
+                <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
+                  <a href="/calendar" style={{ color: "#5b21b6", fontWeight: 700 }}>
+                    חברו Google Calendar
+                  </a>{" "}
+                  כדי לסנכרן משימות.
+                </p>
+              )}
+              <select
+                value={ctTaskStatus}
+                onChange={(e) =>
+                  setCtTaskStatus(e.target.value as "todo" | "in_progress" | "done")
+                }
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              >
+                <option value="todo">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="done">Done</option>
+              </select>
+              <p style={{ margin: 0, fontSize: 11, color: "#6b7280" }}>
+                15 דקות לפני הדדליין נשלחת תזכורת אוטומטית לוובהוק (בנוסף לתזכורת שתקבעו).
+              </p>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  disabled={savingDetail || !ctTaskTitle.trim()}
+                  onClick={() => {
+                    if (!detail) return;
+                    const dueIso = ctTaskDue.trim() ? fromLocalInputTask(ctTaskDue) : "";
+                    const remIso = ctTaskRem.trim() ? fromLocalInputTask(ctTaskRem) : "";
+                    const title = ctTaskTitle.trim();
+                    if (!title) return;
+                    const taskNoteText = ctTaskNote.trim();
+                    const syncOk =
+                      gcalConnected && ctSyncGcal && Boolean(dueIso.trim());
+                    const gcalFields = syncOk
+                      ? { syncToGoogleCalendar: true as const, googleCalendarId: ctGcalCalId }
+                      : {};
+                    if (contactTaskModal.mode === "new") {
+                      const tasks = [
+                        ...(detail.tasks ?? []),
+                        {
+                          id: crypto.randomUUID(),
+                          title,
+                          dueAt: dueIso,
+                          reminderAt: remIso,
+                          done: ctTaskStatus === "done",
+                          status: ctTaskStatus,
+                          comments: [] as Array<{ id: string; text: string; createdAt: string }>,
+                          createdAt: new Date().toISOString(),
+                          ...gcalFields,
+                        },
+                      ];
+                      const noteToAppend = taskNoteText
+                        ? {
+                            id: crypto.randomUUID(),
+                            text: `משימה חדשה: ${title}\n${taskNoteText}`,
+                            createdAt: new Date().toISOString(),
+                            createdBy: "משימות",
+                          }
+                        : null;
+                      const notes = noteToAppend
+                        ? [...(detail.notes ?? []), noteToAppend]
+                        : detail.notes ?? [];
+                      setDetail((d) => (d ? { ...d, tasks, notes } : d));
+                      void saveDetail(noteToAppend ? { tasks, notes } : { tasks });
+                    } else {
+                      const tid = contactTaskModal.task.id;
+                      const tasks = (detail.tasks ?? []).map((x) =>
+                        x.id === tid
+                          ? {
+                              ...x,
+                              title,
+                              dueAt: dueIso,
+                              reminderAt: remIso,
+                              done: ctTaskStatus === "done",
+                              status: ctTaskStatus,
+                              ...gcalFields,
+                              ...(!syncOk
+                                ? {
+                                    syncToGoogleCalendar: false,
+                                    googleCalendarId: undefined,
+                                    googleEventId: undefined,
+                                  }
+                                : {}),
+                            }
+                          : x
+                      );
+                      setDetail((d) => (d ? { ...d, tasks } : d));
+                      void saveDetail({ tasks });
+                    }
+                    setContactTaskModal(null);
+                  }}
+                  style={{
+                    padding: "9px 12px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%)",
+                    color: "#fff",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  שמור
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setContactTaskModal(null)}
+                  style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}
+                >
+                  ביטול
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

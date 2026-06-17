@@ -20,7 +20,7 @@ type Task = {
   done: boolean;
   comments: TaskComment[];
   assignedRep?: string;
-  entityType: "contact" | "opportunity" | "deal";
+  entityType: "contact" | "opportunity";
   entityId: string;
   entityName: string;
   entityPhone?: string;
@@ -34,9 +34,25 @@ type Task = {
 type GCalOptTask = { id: string; summary?: string; primary?: boolean };
 
 type PipelineRow = { id: string; name: string; stages: string[] };
-type ContactOption = { id: string; name: string };
 
 type ViewMode = "pipeline" | "table";
+
+type EntityKind = "contact" | "opportunity";
+
+type ContactOption = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+};
+
+type OpportunityOption = {
+  id: string;
+  name: string;
+  contactName: string;
+  contactPhone: string;
+  pipelineId: string;
+};
 
 const COLUMNS: Array<{ id: TaskStatus; label: string }> = [
   { id: "todo", label: "To Do" },
@@ -53,9 +69,9 @@ function fromLocalInput(v: string): string {
 }
 
 function entityHref(t: Task): string {
-  if (t.entityType === "contact") return `/contacts/${encodeURIComponent(t.entityId)}`;
-  if (t.entityType === "deal") return `/deals/${encodeURIComponent(t.entityId)}`;
-  return `/pipeline?openOpportunityId=${encodeURIComponent(t.entityId)}`;
+  return t.entityType === "contact"
+    ? `/contacts?openContactId=${encodeURIComponent(t.entityId)}`
+    : `/pipeline?openOpportunityId=${encodeURIComponent(t.entityId)}`;
 }
 
 function taskRowKey(t: Task): string {
@@ -119,13 +135,24 @@ export default function TasksClient() {
   const [gcalList, setGcalList] = useState<GCalOptTask[]>([]);
   const [calSync, setCalSync] = useState(false);
   const [calIdPick, setCalIdPick] = useState("primary");
+
   const [createOpen, setCreateOpen] = useState(false);
-  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
-  const [newTitle, setNewTitle] = useState("");
-  const [newDueLocal, setNewDueLocal] = useState("");
-  const [newReminderLocal, setNewReminderLocal] = useState("");
-  const [newContactId, setNewContactId] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [createDue, setCreateDue] = useState("");
+  const [createRem, setCreateRem] = useState("");
+  const [createStatus, setCreateStatus] = useState<TaskStatus>("todo");
+  const [createEntityKind, setCreateEntityKind] = useState<EntityKind>("contact");
+  const [createEntityId, setCreateEntityId] = useState<string>("");
+  const [createEntityQuery, setCreateEntityQuery] = useState<string>("");
+  const [contactsForPicker, setContactsForPicker] = useState<ContactOption[]>([]);
+  const [oppsForPicker, setOppsForPicker] = useState<OpportunityOption[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [createGcalLoading, setCreateGcalLoading] = useState(false);
+  const [createGcalConnected, setCreateGcalConnected] = useState(false);
+  const [createGcalList, setCreateGcalList] = useState<GCalOptTask[]>([]);
+  const [createCalSync, setCreateCalSync] = useState(false);
+  const [createCalIdPick, setCreateCalIdPick] = useState("primary");
 
   useEffect(() => {
     if (!active) {
@@ -227,28 +254,200 @@ export default function TasksClient() {
   }, []);
 
   useEffect(() => {
+    if (!createOpen) return;
+    setCreateTitle("");
+    setCreateDue("");
+    setCreateRem("");
+    setCreateStatus("todo");
+    setCreateEntityId("");
+    setCreateEntityQuery("");
+    setCreateEntityKind("contact");
+  }, [createOpen]);
+
+  useEffect(() => {
+    if (!createOpen) return;
     let cancelled = false;
     void (async () => {
+      setPickerLoading(true);
       try {
-        const res = await fetch("/api/contacts", { credentials: "include", cache: "no-store" });
-        const j = (await res.json().catch(() => ({}))) as {
+        const [cRes, oRes] = await Promise.all([
+          fetch("/api/contacts", { credentials: "include", cache: "no-store" }),
+          fetch("/api/opportunities", { credentials: "include", cache: "no-store" }),
+        ]);
+        const cj = (await cRes.json().catch(() => ({}))) as {
           ok?: boolean;
-          rows?: Array<{ id?: string; name?: string; email?: string; phone?: string }>;
+          rows?: Array<Record<string, string>>;
         };
-        if (!res.ok || !j.ok || cancelled) return;
-        const rows = (j.rows ?? []).map((r) => ({
-          id: String(r.id ?? ""),
-          name: String(r.name ?? r.email ?? r.phone ?? r.id ?? ""),
-        }));
-        setContactOptions(rows.filter((x) => x.id));
+        const oj = (await oRes.json().catch(() => ({}))) as {
+          ok?: boolean;
+          opportunities?: Array<{
+            id?: string;
+            name?: string;
+            contactName?: string;
+            contactPhone?: string;
+            pipelineId?: string;
+          }>;
+        };
+        if (cancelled) return;
+        const contacts: ContactOption[] = Array.isArray(cj.rows)
+          ? cj.rows
+              .map((r) => ({
+                id: String(r.id ?? "").trim(),
+                name: String(r.name ?? "").trim(),
+                email: String(r.email ?? "").trim(),
+                phone: String(r.phone ?? "").trim(),
+              }))
+              .filter((c) => c.id)
+          : [];
+        const opps: OpportunityOption[] = Array.isArray(oj.opportunities)
+          ? oj.opportunities
+              .map((o) => ({
+                id: String(o.id ?? "").trim(),
+                name: String(o.name ?? "").trim(),
+                contactName: String(o.contactName ?? "").trim(),
+                contactPhone: String(o.contactPhone ?? "").trim(),
+                pipelineId: String(o.pipelineId ?? "").trim(),
+              }))
+              .filter((o) => o.id)
+          : [];
+        setContactsForPicker(contacts);
+        setOppsForPicker(opps);
       } catch {
-        /* ignore */
+        if (!cancelled) {
+          setContactsForPicker([]);
+          setOppsForPicker([]);
+        }
+      } finally {
+        if (!cancelled) setPickerLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [createOpen]);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    let cancelled = false;
+    void (async () => {
+      setCreateGcalLoading(true);
+      try {
+        const stRes = await fetch("/api/google-calendar/status", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        const st = (await stRes.json().catch(() => ({}))) as {
+          ok?: boolean;
+          connected?: boolean;
+        };
+        const connected = Boolean(stRes.ok && st.ok && st.connected);
+        let cals: GCalOptTask[] = [];
+        if (connected) {
+          const cRes = await fetch("/api/google-calendar/calendars", {
+            credentials: "include",
+            cache: "no-store",
+          });
+          const cj = (await cRes.json().catch(() => ({}))) as {
+            ok?: boolean;
+            calendars?: GCalOptTask[];
+          };
+          if (cRes.ok && cj.ok) cals = cj.calendars ?? [];
+        }
+        if (cancelled) return;
+        const defaultCal = cals.find((c) => c.primary)?.id ?? cals[0]?.id ?? "primary";
+        setCreateGcalConnected(connected);
+        setCreateGcalList(cals);
+        setCreateCalSync(connected);
+        setCreateCalIdPick(defaultCal);
+      } catch {
+        if (!cancelled) {
+          setCreateGcalConnected(false);
+          setCreateGcalList([]);
+          setCreateCalSync(false);
+        }
+      } finally {
+        if (!cancelled) setCreateGcalLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [createOpen]);
+
+  useEffect(() => {
+    setCreateEntityId("");
+    setCreateEntityQuery("");
+  }, [createEntityKind]);
+
+  const filteredContacts = useMemo(() => {
+    const q = createEntityQuery.trim().toLowerCase();
+    if (!q) return contactsForPicker.slice(0, 30);
+    return contactsForPicker
+      .filter((c) =>
+        [c.name, c.email, c.phone].some((v) => v.toLowerCase().includes(q))
+      )
+      .slice(0, 30);
+  }, [contactsForPicker, createEntityQuery]);
+
+  const filteredOpps = useMemo(() => {
+    const q = createEntityQuery.trim().toLowerCase();
+    if (!q) return oppsForPicker.slice(0, 30);
+    return oppsForPicker
+      .filter((o) =>
+        [o.name, o.contactName, o.contactPhone].some((v) => v.toLowerCase().includes(q))
+      )
+      .slice(0, 30);
+  }, [oppsForPicker, createEntityQuery]);
+
+  async function submitCreateTask() {
+    const title = createTitle.trim();
+    if (!title) {
+      setErr("יש להזין כותרת למשימה");
+      return;
+    }
+    if (!createEntityId.trim()) {
+      setErr("יש לבחור איש קשר או הזדמנות לשייך את המשימה");
+      return;
+    }
+    setCreatingTask(true);
+    setErr(null);
+    try {
+      const dueIso = createDue.trim() ? fromLocalInput(createDue) : "";
+      const remIso = createRem.trim() ? fromLocalInput(createRem) : "";
+      const syncOk =
+        createGcalConnected && createCalSync && Boolean(dueIso.trim());
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: createEntityKind,
+          entityId: createEntityId.trim(),
+          title,
+          dueAt: dueIso,
+          reminderAt: remIso,
+          status: createStatus,
+          ...(syncOk
+            ? { syncToGoogleCalendar: true, googleCalendarId: createCalIdPick }
+            : {}),
+        }),
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        task?: Task;
+      };
+      if (!res.ok || !j.ok || !j.task) {
+        throw new Error(j.error ?? "יצירת המשימה נכשלה");
+      }
+      setTasks((arr) => [j.task!, ...arr]);
+      setCreateOpen(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "יצירת המשימה נכשלה");
+    } finally {
+      setCreatingTask(false);
+    }
+  }
 
   const grouped = useMemo(() => {
     return {
@@ -366,41 +565,6 @@ export default function TasksClient() {
     return true;
   }
 
-  async function createTaskFromBoard() {
-    const title = newTitle.trim();
-    const entityId = newContactId.trim();
-    if (!title || !entityId) return;
-    setCreating(true);
-    setErr(null);
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          entityType: "contact",
-          entityId,
-          title,
-          dueAt: newDueLocal.trim() ? fromLocalInput(newDueLocal) : "",
-          reminderAt: newReminderLocal.trim() ? fromLocalInput(newReminderLocal) : "",
-          status: "todo",
-        }),
-      });
-      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; task?: Task };
-      if (!res.ok || !j.ok || !j.task) throw new Error(j.error ?? "יצירת משימה נכשלה");
-      setTasks((arr) => [j.task!, ...arr]);
-      setCreateOpen(false);
-      setNewTitle("");
-      setNewDueLocal("");
-      setNewReminderLocal("");
-      setNewContactId("");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "יצירת משימה נכשלה");
-    } finally {
-      setCreating(false);
-    }
-  }
-
   function renderTaskCard(t: Task, opts?: { pipelineScope?: string }) {
     const blocked =
       opts?.pipelineScope !== undefined && t.pipelineId !== opts.pipelineScope;
@@ -436,7 +600,7 @@ export default function TasksClient() {
         >
           <div style={{ fontWeight: 900, fontSize: 13 }}>{t.title}</div>
           <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-            {t.entityType === "contact" ? "איש קשר" : t.entityType === "deal" ? "עסקה" : "לקוח"}:{" "}
+            {t.entityType === "contact" ? "איש קשר" : "הזדמנות"}:{" "}
             <span
               role="link"
               tabIndex={0}
@@ -517,7 +681,7 @@ export default function TasksClient() {
 
   return (
     <div style={{ width: "100%", maxWidth: "100%", minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>משימות</h1>
         <span
           style={{
@@ -533,74 +697,22 @@ export default function TasksClient() {
         </span>
         <button
           type="button"
-          onClick={() => setCreateOpen((v) => !v)}
+          onClick={() => setCreateOpen(true)}
           style={{
+            marginInlineStart: "auto",
+            padding: "8px 14px",
+            borderRadius: 999,
             border: "none",
             background: "linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%)",
             color: "#fff",
-            borderRadius: 10,
-            padding: "8px 12px",
-            cursor: "pointer",
             fontWeight: 800,
+            cursor: "pointer",
+            fontSize: 13,
           }}
         >
-          + הוסף משימה
+          + צור משימה חדשה
         </button>
       </div>
-
-      {createOpen ? (
-        <div style={{ marginBottom: 12, border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="כותרת משימה"
-              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
-            />
-            <select
-              value={newContactId}
-              onChange={(e) => setNewContactId(e.target.value)}
-              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
-            >
-              <option value="">בחר לקוח</option>
-              {contactOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="datetime-local"
-              value={newDueLocal}
-              onChange={(e) => setNewDueLocal(e.target.value)}
-              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
-            />
-            <input
-              type="datetime-local"
-              value={newReminderLocal}
-              onChange={(e) => setNewReminderLocal(e.target.value)}
-              style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
-            />
-          </div>
-          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => void createTaskFromBoard()}
-              disabled={creating || !newTitle.trim() || !newContactId.trim()}
-              style={{ border: "none", background: "#6d28d9", color: "#fff", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontWeight: 800 }}
-            >
-              {creating ? "יוצר…" : "צור משימה"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(false)}
-              style={{ border: "1px solid #e5e7eb", background: "#fff", borderRadius: 10, padding: "8px 12px", cursor: "pointer", fontWeight: 700 }}
-            >
-              ביטול
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {viewToggle}
 
@@ -871,6 +983,274 @@ export default function TasksClient() {
         </div>
       )}
 
+      {createOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+          onMouseDown={() => {
+            if (creatingTask) return;
+            setCreateOpen(false);
+          }}
+        >
+          <div
+            style={{
+              width: "min(520px, 96vw)",
+              maxHeight: "92vh",
+              overflow: "auto",
+              background: "#fff",
+              borderRadius: 16,
+              border: "1px solid #e5e7eb",
+              padding: 16,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.12)",
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 12px", fontSize: 17, fontWeight: 900 }}>
+              משימה חדשה
+            </h3>
+            <div style={{ display: "grid", gap: 8 }}>
+              <label style={{ fontWeight: 700, fontSize: 12 }}>כותרת</label>
+              <input
+                value={createTitle}
+                onChange={(e) => setCreateTitle(e.target.value)}
+                placeholder="כותרת המשימה"
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+
+              <label style={{ fontWeight: 700, fontSize: 12 }}>שייך ל</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(
+                  [
+                    ["contact", "איש קשר"],
+                    ["opportunity", "הזדמנות"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCreateEntityKind(id)}
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      border: createEntityKind === id ? "2px solid #6d28d9" : "1px solid #e5e7eb",
+                      background: createEntityKind === id ? "#f5f3ff" : "#fff",
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      fontSize: 13,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                value={createEntityQuery}
+                onChange={(e) => setCreateEntityQuery(e.target.value)}
+                placeholder={
+                  createEntityKind === "contact"
+                    ? "חיפוש לפי שם / אימייל / טלפון"
+                    : "חיפוש לפי שם הזדמנות / איש קשר / טלפון"
+                }
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  background: "#fafafa",
+                  maxHeight: 200,
+                  overflow: "auto",
+                }}
+              >
+                {pickerLoading ? (
+                  <div style={{ padding: 10, color: "#6b7280", fontSize: 12 }}>טוען...</div>
+                ) : createEntityKind === "contact" ? (
+                  filteredContacts.length === 0 ? (
+                    <div style={{ padding: 10, color: "#6b7280", fontSize: 12 }}>
+                      אין תוצאות
+                    </div>
+                  ) : (
+                    filteredContacts.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCreateEntityId(c.id)}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          textAlign: "right",
+                          padding: "8px 10px",
+                          background:
+                            createEntityId === c.id ? "#ede9fe" : "transparent",
+                          border: "none",
+                          borderBottom: "1px solid #f3f4f6",
+                          cursor: "pointer",
+                          fontSize: 13,
+                        }}
+                      >
+                        <div style={{ fontWeight: 800 }}>{c.name || c.email || c.phone || c.id}</div>
+                        <div style={{ fontSize: 11, color: "#6b7280" }}>
+                          {[c.phone, c.email].filter(Boolean).join(" · ")}
+                        </div>
+                      </button>
+                    ))
+                  )
+                ) : filteredOpps.length === 0 ? (
+                  <div style={{ padding: 10, color: "#6b7280", fontSize: 12 }}>אין תוצאות</div>
+                ) : (
+                  filteredOpps.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => setCreateEntityId(o.id)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "right",
+                        padding: "8px 10px",
+                        background:
+                          createEntityId === o.id ? "#ede9fe" : "transparent",
+                        border: "none",
+                        borderBottom: "1px solid #f3f4f6",
+                        cursor: "pointer",
+                        fontSize: 13,
+                      }}
+                    >
+                      <div style={{ fontWeight: 800 }}>{o.name || o.id}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        {[o.contactName, o.contactPhone].filter(Boolean).join(" · ")}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <label style={{ fontWeight: 700, fontSize: 12 }}>דדליין (אופציונלי)</label>
+              <input
+                type="datetime-local"
+                value={createDue}
+                onChange={(e) => setCreateDue(e.target.value)}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+              <label style={{ fontWeight: 700, fontSize: 12 }}>תזכורת (אופציונלי)</label>
+              <input
+                type="datetime-local"
+                value={createRem}
+                onChange={(e) => setCreateRem(e.target.value)}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              />
+
+              {createGcalLoading ? (
+                <p style={{ margin: 0, fontSize: 11, color: "#6b7280" }}>
+                  בודק חיבור ל-Google Calendar...
+                </p>
+              ) : createGcalConnected ? (
+                <div
+                  style={{
+                    border: "1px solid #e9d5ff",
+                    borderRadius: 12,
+                    padding: 10,
+                    background: "#faf5ff",
+                  }}
+                >
+                  <label
+                    style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 12 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={createCalSync}
+                      onChange={(e) => setCreateCalSync(e.target.checked)}
+                    />
+                    סנכרן ל-Google Calendar
+                  </label>
+                  <p style={{ margin: "6px 0 8px", fontSize: 11, color: "#6b7280" }}>
+                    דדליין חובה לסנכרון.
+                  </p>
+                  <select
+                    value={createCalIdPick}
+                    onChange={(e) => setCreateCalIdPick(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e5e7eb",
+                    }}
+                  >
+                    {createGcalList.length === 0 ? (
+                      <option value="primary">ראשי (primary)</option>
+                    ) : (
+                      createGcalList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {(c.summary ?? c.id) + (c.primary ? " ★" : "")}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              ) : null}
+
+              <label style={{ fontWeight: 700, fontSize: 12 }}>סטטוס</label>
+              <select
+                value={createStatus}
+                onChange={(e) => setCreateStatus(e.target.value as TaskStatus)}
+                style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
+              >
+                <option value="todo">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="done">Done</option>
+              </select>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  disabled={creatingTask || !createTitle.trim() || !createEntityId.trim()}
+                  onClick={() => void submitCreateTask()}
+                  style={{
+                    padding: "9px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%)",
+                    color: "#fff",
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    opacity:
+                      creatingTask || !createTitle.trim() || !createEntityId.trim()
+                        ? 0.6
+                        : 1,
+                  }}
+                >
+                  {creatingTask ? "שומר..." : "צור משימה"}
+                </button>
+                <button
+                  type="button"
+                  disabled={creatingTask}
+                  onClick={() => setCreateOpen(false)}
+                  style={{
+                    padding: "9px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  ביטול
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {active && (
         <div style={{ position: "fixed", inset: 0, zIndex: 95 }}>
           <div
@@ -907,7 +1287,7 @@ export default function TasksClient() {
                   textDecoration: "none",
                 }}
               >
-                {active.entityType === "contact" ? "פתח איש קשר" : active.entityType === "deal" ? "פתח עסקה" : "פתח לקוח"}
+                {active.entityType === "contact" ? "פתח איש קשר" : "פתח הזדמנות"}
               </a>
               <span style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>
                 {active.pipelineName}

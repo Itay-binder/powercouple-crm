@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { signOut } from "firebase/auth";
-import { getFirebaseAuth } from "@/lib/firebase/client";
+import { getBrowserSupabase } from "@/lib/supabase/browser";
 import type { CrmTenantOption } from "@/app/components/CrmShell";
 
 type Props = {
@@ -30,11 +29,10 @@ export default function UserMenu({
   const onLogout = async () => {
     setOpen(false);
     try {
-      await signOut(getFirebaseAuth());
+      await getBrowserSupabase().auth.signOut();
     } catch {
       // ignore
     }
-    await fetch("/api/auth/session", { method: "DELETE", credentials: "include" });
     window.location.href = "/login";
   };
 

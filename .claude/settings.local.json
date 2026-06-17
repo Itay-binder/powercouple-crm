@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh auth *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(git pull *)",
+      "Bash(git commit -m 'fix\\(mover-profiles\\): graceful session fallback + opportunity auto-fill *)",
+      "Bash(git commit -m 'fix\\(nav\\): show mover-profiles link for all tenants, not only moving-orders *)",
+      "Bash(git commit -m 'fix\\(mover-profiles\\): remove composite index requirement from reviews/photos queries *)"
+    ]
+  },
+  "mcpServers": {
+    "liftygo-crm": {
+      "command": "node",
+      "args": ["C:\\Users\\itay\\liftygo CRM\\mcp-server\\dist\\index.js"]
+    }
+  }
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
 import {
-  createTaskAndSync,
+  createTaskOnEntity,
   listUnifiedTasks,
   type TaskStatus,
   updateTaskAndSync,
@@ -37,6 +37,53 @@ export async function GET(req: NextRequest) {
   }
 }
 
+export async function POST(req: NextRequest) {
+  const auth = await requireApprovedUser(req);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error } satisfies ApiErr,
+      { status: auth.status }
+    );
+  }
+  try {
+    const body = (await req.json()) as {
+      entityType?: "contact" | "opportunity";
+      entityId?: string;
+      title?: string;
+      dueAt?: string;
+      reminderAt?: string;
+      status?: TaskStatus;
+      syncToGoogleCalendar?: boolean;
+      googleCalendarId?: string;
+    };
+    const entityType = body.entityType;
+    const entityId = body.entityId?.trim();
+    const title = body.title?.trim();
+    if (!entityType || !entityId) {
+      throw new Error("entityType and entityId are required");
+    }
+    if (!title) {
+      throw new Error("title is required");
+    }
+    const task = await createTaskOnEntity({
+      entityType,
+      entityId,
+      title,
+      dueAt: body.dueAt,
+      reminderAt: body.reminderAt,
+      status: body.status,
+      syncToGoogleCalendar: body.syncToGoogleCalendar,
+      googleCalendarId: body.googleCalendarId,
+    });
+    return NextResponse.json({ ok: true, task });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Unknown error" } satisfies ApiErr,
+      { status: 400 }
+    );
+  }
+}
+
 export async function PATCH(req: NextRequest) {
   const auth = await requireApprovedUser(req);
   if (!auth.ok) {
@@ -47,7 +94,7 @@ export async function PATCH(req: NextRequest) {
   }
   try {
     const body = (await req.json()) as {
-      entityType?: "contact" | "opportunity" | "deal";
+      entityType?: "contact" | "opportunity";
       entityId?: string;
       taskId?: string;
       status?: TaskStatus;
@@ -73,50 +120,6 @@ export async function PATCH(req: NextRequest) {
       dueAt: body.dueAt,
       reminderAt: body.reminderAt,
       commentText: body.commentText,
-      syncToGoogleCalendar: body.syncToGoogleCalendar,
-      googleCalendarId: body.googleCalendarId,
-    });
-    return NextResponse.json({ ok: true, task });
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "Unknown error" } satisfies ApiErr,
-      { status: 400 }
-    );
-  }
-}
-
-export async function POST(req: NextRequest) {
-  const auth = await requireApprovedUser(req);
-  if (!auth.ok) {
-    return NextResponse.json(
-      { ok: false, error: auth.error } satisfies ApiErr,
-      { status: auth.status }
-    );
-  }
-  try {
-    const body = (await req.json()) as {
-      entityType?: "contact" | "opportunity" | "deal";
-      entityId?: string;
-      title?: string;
-      dueAt?: string;
-      reminderAt?: string;
-      status?: TaskStatus;
-      syncToGoogleCalendar?: boolean;
-      googleCalendarId?: string;
-    };
-    const entityType = body.entityType;
-    const entityId = body.entityId?.trim();
-    const title = body.title?.trim();
-    if (!entityType || !entityId || !title) {
-      throw new Error("entityType, entityId and title are required");
-    }
-    const task = await createTaskAndSync({
-      entityType,
-      entityId,
-      title,
-      dueAt: body.dueAt,
-      reminderAt: body.reminderAt,
-      status: body.status,
       syncToGoogleCalendar: body.syncToGoogleCalendar,
       googleCalendarId: body.googleCalendarId,
     });

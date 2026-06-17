@@ -353,11 +353,28 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
             lineHeight: 1.55,
           }}
         >
-          <strong>דחיפה לטלפון (אנדרואיד / iOS):</strong> זה מתבצע דרך <strong>Web Push</strong> (דפדפן או אפליקציית
-          הבית). <strong>אין דרך לאתר</strong> לשכפל את התנהגות «התראות חירום» של המדינה — זה ערוץ סלולרי נפרד.
-          ב־<strong>מצב «נא לא להפריע»</strong> או כשהמסך כבוי, מה שיקרה תלוי ב־Android / iOS ובהגדרות הדפדפן (Chrome
-          וכו׳); לעיתים ההתראה תגיע בשקט או רק ברקע. ב־<strong>iPhone</strong> מומלץ להוסיף את האתר ל־
-          <strong>מסך הבית</strong> ולפתוח ממנו — כך דחיפה ברקע עובדת טוב יותר מאשר טאב רגיל בספארי.
+          <strong>למה זה עובד רק כשאני «נכנס לדפדפן»?</strong> יש שני מסלולים:{" "}
+          <strong>התראות דפדפן</strong> (לשונית / טאב) — דורשות שהדפדפן יהיה פעיל או קרוב לרקע.{" "}
+          <strong>דחיפה למכשיר (Web Push)</strong> — אמורה להגיע גם כשהאפליקציה סגורה, דרך Service Worker של
+          Chrome או של <strong>קיצור מסך הבית</strong> (מומלץ: פתחו את ה־CRM מהאייקון במסך הבית, לא מטאב רגיל).
+          אחרי הוספה למסך הבית לחצו שוב על «הפעל התראות דחיפה למכשיר» כדי לרשום את אותו דפדפן/אפליקציה.
+        </div>
+        <div
+          style={{
+            marginBottom: 20,
+            padding: 14,
+            borderRadius: 12,
+            border: "1px solid #e9d5ff",
+            background: "#faf5ff",
+            color: "#4c1d95",
+            fontSize: 13,
+            lineHeight: 1.55,
+          }}
+        >
+          <strong>קול במצב שקט / DND:</strong> אתר לא יכול לעקוף את מערכת ההפעלה. ב־<strong>מצב שקט</strong> (רק
+          רטט) — בדקו בהגדרות Chrome קטגורי התראות (אתרים) שמותר <strong>צליל</strong>. ב־<strong>נא לא להפריע</strong>{" "}
+          צריך <strong>חריג</strong> ל־Chrome או לקטגוריה; אחרת ההתראה עלולה להגיע בשקט או לא להופיע — זה לא
+          «התראת חירום» מדינתית ואין דרך לאתר לשכפל אותה.
         </div>
 
         {browserNeedsConsent ? (
@@ -396,8 +413,8 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
               (v) => persist({ ...prefs, inAppNewLead: v })
             )}
             {row(
-              "התראה צפה — לקוח חדש",
-              "כרטיס כשנוצר לקוח חדש בפייפליין.",
+              "התראה צפה — הזדמנות חדשה",
+              "כרטיס כשנוצרת הזדמנות חדשה.",
               prefs.inAppNewOpportunity,
               (v) => persist({ ...prefs, inAppNewOpportunity: v })
             )}
@@ -419,8 +436,9 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
           <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280", lineHeight: 1.55 }}>
             כאן נשלחות התראות דרך <strong>שרת</strong> — גם כשהדפדפן ברקע, המסך כבוי או (במכשירים נתמכים) במסך נעילה.
             <strong> מצב «נא לא להפריע»</strong> ועדיפות התראה נקבעים בהגדרות <strong>מערכת ההפעלה</strong> ובאפליקציית
-            הדפדפן (Chrome/Safari); לא ניתן לעקוף אותם מתוך האתר. ב־iOS מומלץ להוסיף את האתר למסך הבית (PWA)
-            כדי לקבל דחיפה ברקע.
+            הדפדפן (Chrome/Safari); לא ניתן לעקוף אותם מתוך האתר. ב־<strong>אנדרואיד</strong> מומלץ: Chrome → תפריט →
+            «הוסף למסך הבית», ואז לפתוח את ה־CRM מהאייקון (מצב standalone) ולבצע שוב הרשמה לדחיפה. ב־iOS מומלץ אותו
+            דבר — דחיפה ברקע עובדת טוב יותר מטאב רגיל בספארי.
           </p>
           {!VAPID_PUBLIC || !pushConfigured ? (
             <div
@@ -455,8 +473,8 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
               (v) => void patchDevicePrefs({ ...devicePrefs, newLead: v })
             )}
             {row(
-              "דחיפה — לקוח חדש",
-              "נשלח כשנוצר לקוח חדש בפייפליין.",
+              "דחיפה — הזדמנות חדשה",
+              "נשלח כשנוצרת הזדמנות חדשה.",
               devicePrefs.newOpportunity,
               (v) => void patchDevicePrefs({ ...devicePrefs, newOpportunity: v })
             )}
@@ -599,7 +617,7 @@ export default function NotificationsClient({ showMovingOrders, tenantId = null 
               (v) => persistBrowserToggles({ ...prefs, browserNewLead: v })
             )}
             {row(
-              "התראת דפדפן — לקוח חדש",
+              "התראת דפדפן — הזדמנות חדשה",
               "מופעל רק אם ההרשאה מאושרת וגם אפשרות זו מסומנת.",
               prefs.browserNewOpportunity,
               (v) => persistBrowserToggles({ ...prefs, browserNewOpportunity: v })

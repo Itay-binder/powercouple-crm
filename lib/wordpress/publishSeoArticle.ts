@@ -8,7 +8,7 @@ export type WordPressPublishResult = {
 
 /**
  * פרסום פוסט לוורדפרס (REST). משתני סביבה:
- * WORDPRESS_REST_BASE — למשל https://example.com/wp-json
+ * WORDPRESS_REST_BASE — למשל https://liftygo.co.il/wp-json
  * WORDPRESS_USERNAME — שם משתמש וורדפרס
  * WORDPRESS_APP_PASSWORD — סיסמת אפליקציה (רווחים מוסרים אוטומטית)
  */

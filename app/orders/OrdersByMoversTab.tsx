@@ -63,7 +63,7 @@ export default function OrdersByMoversTab() {
   if (items.length === 0) {
     return (
       <div style={{ padding: 20, background: "#fff", borderRadius: 14, border: "1px solid #e5e7eb", marginTop: 8 }}>
-        אין לקוחות בפייפליין «לקוחות משלמים».
+        אין הזדמנויות בפייפליין «לקוחות משלמים».
       </div>
     );
   }

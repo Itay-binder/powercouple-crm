@@ -1,4 +1,5 @@
 import type { WhatsAppMetaConfig, WhatsAppTemplateRecord } from "@/lib/whatsapp/repo";
+import { normalizeGraphId, normalizeWhatsAppMetaConfigIds } from "@/lib/whatsapp/metaIds";
 import { countBodyPlaceholders } from "@/lib/whatsapp/templateParams";
 import { uploadMediaHandleFromUrl } from "@/lib/whatsapp/metaMediaUpload";
 
@@ -149,10 +150,60 @@ function validateTemplateForMeta(template: WhatsAppTemplateRecord): void {
   }
 }
 
+/**
+ * בודק שמזהי WABA / Phone Number תקינים (ספרות בלבד), שהטוקן יכול לקרוא את ה-WABA,
+ * ושמזהה מספר השולח שייך לאותו WABA. מפחית שגיאות Graph מסוג "Object does not exist".
+ */
+export async function assertWhatsAppMetaGraphIdsAndAccess(config: WhatsAppMetaConfig): Promise<void> {
+  const token = config.systemUserToken.trim();
+  if (!token) {
+    throw new Error("חסר System User Access Token.");
+  }
+  const wabaId = normalizeGraphId(config.wabaId);
+  const phoneId = normalizeGraphId(config.phoneNumberId);
+  if (!wabaId) {
+    throw new Error("חסר WhatsApp Business Account ID (WABA). הזינו ב«חשבון WhatsApp».");
+  }
+  if (!phoneId) {
+    throw new Error("חסר Phone Number ID. הזינו ב«חשבון WhatsApp».");
+  }
+  if (!/^\d+$/.test(wabaId)) {
+    throw new Error(
+      "שדה WABA חייב להכיל ספרות בלבד. ודאו שהעתקתם את WhatsApp Business Account ID (מספר ארוך), ולא טקסט או מזהה אחר. מיקום טיפוסי: Meta Business Suite > הגדרות חשבון > חשבונות WhatsApp > בחרו חשבון > API Setup."
+    );
+  }
+  if (!/^\d+$/.test(phoneId)) {
+    throw new Error(
+      "שדה Phone Number ID חייב להכיל ספרות בלבד. זהו מזהה נפרד מ-WABA — מופיע באותו מסך API Setup ליד מספר השולח."
+    );
+  }
+  const appIdNorm = normalizeGraphId(config.appId);
+  if (appIdNorm && !/^\d+$/.test(appIdNorm)) {
+    throw new Error("שדה Meta App ID חייב להכיל ספרות בלבד.");
+  }
+
+  try {
+    await callMeta<{ id?: string }>(`/${wabaId}?fields=id,name`, token);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `לא ניתן לגשת לחשבון ה-WABA עם הטוקן והמזהים השמורים. ${detail}\n\n` +
+        "רשימת בדיקה:\n" +
+        "• WABA ID — רק מספר חשבון ה-WhatsApp Business (למשל מתוך API Setup), לא Phone Number ID ולא Business ID אם הוא שונה מה-WABA.\n" +
+        "• System User Token — טוקן של System User עם הרשאות whatsapp_business_management על אותו Business שבו ה-WABA.\n" +
+        "• ודאו שהטוקן לא פג תוקף ושלא הוחלפו בטעות שדות בטופס «חשבון WhatsApp»."
+    );
+  }
+
+  await assertPhoneNumberBelongsToWaba({ ...config, wabaId, phoneNumberId: phoneId, systemUserToken: token });
+}
+
 export async function submitTemplateToMeta(
   config: WhatsAppMetaConfig,
   template: WhatsAppTemplateRecord
 ): Promise<MetaTemplateCreateResponse> {
+  const cfg = normalizeWhatsAppMetaConfigIds(config);
+  await assertWhatsAppMetaGraphIdsAndAccess(cfg);
   const t = normalizeTemplateComponents(template);
   validateTemplateForMeta(t);
   const components: Array<Record<string, unknown>> = [];
@@ -169,11 +220,11 @@ export async function submitTemplateToMeta(
     if (!url) {
       throw new Error("חסר קישור מדיה לכותרת (HTTPS ציבורי).");
     }
-    const appId = config.appId?.trim();
+    const appId = cfg.appId?.trim();
     if (!appId) {
       throw new Error("חסר App ID בהגדרות ווצאפ — נדרש להעלאת מדיה לאישור במטא.");
     }
-    const handle = await uploadMediaHandleFromUrl(appId, config.systemUserToken, url, hf);
+    const handle = await uploadMediaHandleFromUrl(appId, cfg.systemUserToken, url, hf);
     components.push({
       type: "HEADER",
       format: hf,
@@ -212,7 +263,7 @@ export async function submitTemplateToMeta(
     components.push({ type: "BUTTONS", buttons: buttonsPayload });
   }
 
-  return callMeta<MetaTemplateCreateResponse>(`/${config.wabaId}/message_templates`, config.systemUserToken, {
+  return callMeta<MetaTemplateCreateResponse>(`/${cfg.wabaId}/message_templates`, cfg.systemUserToken, {
     method: "POST",
     body: JSON.stringify({
       name: t.name,
@@ -231,6 +282,7 @@ export async function sendTemplateMessageViaMeta(
     bodyParameterValues: string[];
   }
 ): Promise<{ messageId?: string }> {
+  const cfg = normalizeWhatsAppMetaConfigIds(config);
   const template = input.template;
   const templateComponents: Array<Record<string, unknown>> = [];
 
@@ -281,8 +333,8 @@ export async function sendTemplateMessageViaMeta(
   };
 
   const res = await callMeta<MetaMessageSendResponse>(
-    `/${config.phoneNumberId}/messages`,
-    config.systemUserToken,
+    `/${cfg.phoneNumberId}/messages`,
+    cfg.systemUserToken,
     {
       method: "POST",
       body: JSON.stringify(payload),
@@ -296,6 +348,7 @@ export async function sendSessionTextMessageViaMeta(
   config: WhatsAppMetaConfig,
   input: { to: string; body: string }
 ): Promise<{ messageId?: string }> {
+  const cfg = normalizeWhatsAppMetaConfigIds(config);
   const text = input.body.trim();
   if (!text) throw new Error("טקסט ההודעה ריק.");
   if (text.length > 4096) {
@@ -309,8 +362,8 @@ export async function sendSessionTextMessageViaMeta(
     text: { preview_url: false, body: text },
   };
   const res = await callMeta<MetaMessageSendResponse>(
-    `/${config.phoneNumberId}/messages`,
-    config.systemUserToken,
+    `/${cfg.phoneNumberId}/messages`,
+    cfg.systemUserToken,
     {
       method: "POST",
       body: JSON.stringify(payload),
@@ -428,14 +481,16 @@ async function fetchAbsoluteMeta<T>(url: string, token: string): Promise<T> {
 }
 
 export async function listTemplatesFromMeta(config: WhatsAppMetaConfig): Promise<MetaTemplateSnapshot[]> {
+  const cfg = normalizeWhatsAppMetaConfigIds(config);
+  await assertWhatsAppMetaGraphIdsAndAccess(cfg);
   const fields = encodeURIComponent("id,name,status,category,language,components");
-  let nextPath = `/${config.wabaId}/message_templates?fields=${fields}&limit=100`;
+  let nextPath = `/${cfg.wabaId}/message_templates?fields=${fields}&limit=100`;
   let nextAbsoluteUrl = "";
   const out: MetaTemplateSnapshot[] = [];
   while (nextPath || nextAbsoluteUrl) {
     const page = nextAbsoluteUrl
-      ? await fetchAbsoluteMeta<MetaTemplateListResponse>(nextAbsoluteUrl, config.systemUserToken)
-      : await callMeta<MetaTemplateListResponse>(nextPath, config.systemUserToken);
+      ? await fetchAbsoluteMeta<MetaTemplateListResponse>(nextAbsoluteUrl, cfg.systemUserToken)
+      : await callMeta<MetaTemplateListResponse>(nextPath, cfg.systemUserToken);
     const rows = Array.isArray(page.data) ? page.data : [];
     for (const row of rows) {
       const mapped = mapMetaTemplateNode(row);
@@ -450,14 +505,17 @@ export async function listTemplatesFromMeta(config: WhatsAppMetaConfig): Promise
 }
 
 export async function assertPhoneNumberBelongsToWaba(config: WhatsAppMetaConfig): Promise<void> {
+  const wabaId = normalizeGraphId(config.wabaId);
   const info = await callMeta<MetaWabaPhoneNumbersResponse>(
-    `/${config.wabaId}/phone_numbers?fields=id&limit=500`,
-    config.systemUserToken
+    `/${wabaId}/phone_numbers?fields=id&limit=500`,
+    config.systemUserToken.trim()
   );
-  const expectedPhoneId = config.phoneNumberId.trim();
+  const expectedPhoneId = normalizeGraphId(config.phoneNumberId);
   const numbers = Array.isArray(info.data) ? info.data : [];
   const belongs = numbers.some((row) => (row.id ?? "").trim() === expectedPhoneId);
   if (!belongs) {
-    throw new Error("Phone Number ID לא שייך ל־WABA שהוגדר במערכת. עדכנו מזהים תואמים.");
+    throw new Error(
+      "Phone Number ID לא שייך ל־WABA שהוזן. בדקו שלא החלפתם בטעות בין שני השדות ב«חשבון WhatsApp», או העתיקו מחדש מ־API Setup את שני המזהים מאותו חשבון WhatsApp Business."
+    );
   }
 }

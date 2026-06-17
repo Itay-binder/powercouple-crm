@@ -1,31 +1,24 @@
 "use client";
 
-import { type FirebaseApp, getApps, initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-
-const config = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-export function getFirebaseApp(): FirebaseApp {
-  if (!getApps().length) {
-    return initializeApp(config);
-  }
-  return getApps()[0] as FirebaseApp;
+/**
+ * Firebase client auth was removed in the Supabase migration. PowerCouple CRM auth
+ * now uses Supabase (see lib/supabase/browser.ts). These stubs remain only so the
+ * out-of-scope mover-profile components keep compiling; calling them throws.
+ */
+function notAvailable(): never {
+  throw new Error("Firebase client auth is no longer available (migrated to Supabase).");
 }
 
-export function getFirebaseAuth() {
-  // client side auth
-  const app = getFirebaseApp();
-  return getAuth(app);
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export function getFirebaseApp(): any {
+  return notAvailable();
 }
 
-export function getGoogleProvider() {
-  return new GoogleAuthProvider();
+export function getFirebaseAuth(): any {
+  return notAvailable();
 }
 
+export function getGoogleProvider(): any {
+  return notAvailable();
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */

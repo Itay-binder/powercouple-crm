@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
-import { getLeadById } from "@/lib/leads/repo";
+import { getLeadById, listLeadsFiltered } from "@/lib/leads/repo";
 import { assertMovingOrdersWorkspace } from "@/lib/movingOrders/guard";
 import { createMovingOrderManual, listMovingOrders } from "@/lib/movingOrders/repo";
 import { listOpportunities } from "@/lib/opportunities/repo";
@@ -8,6 +8,7 @@ import { getCityRegionMap } from "@/lib/movingOrders/cityRegionSettingsRepo";
 import { PAYING_CUSTOMERS_PIPELINE_ID } from "@/lib/movingOrders/fieldIds";
 import { driverIdsForOpportunitiesColumn } from "@/lib/movingOrders/driverIdsForOpportunityDisplay";
 import {
+  matchMoversForOrderDetailed,
   opportunitiesByContactId,
   orderTransportRegionDisplayTokens,
   resolveOrderCities,
@@ -18,7 +19,6 @@ import { hebrewWeekdayMovingOrder } from "@/lib/movingOrders/orderMoveDate";
 import type {
   DriverSummary,
   MoverMatchEnrichment,
-  MovingOrderRecord,
   OrderMatchUiHints,
   OrderMatchedOpportunitySummary,
 } from "@/lib/movingOrders/types";
@@ -40,6 +40,30 @@ export async function GET(req: NextRequest) {
   try {
     const pipelineId = req.nextUrl.searchParams.get("pipelineId")?.trim() || undefined;
     const orders = await listMovingOrders({ pipelineId: pipelineId ?? null, db: g.db });
+    const [regionMap, allOpps] = await Promise.all([getCityRegionMap(), listOpportunities(PAYING_CUSTOMERS_PIPELINE_ID)]);
+
+    const pendingUnsent = orders.filter(
+      (o) => o.status === "pending" && (o.sentMatchDriverIds?.length ?? 0) === 0
+    );
+    if (pendingUnsent.length > 0) {
+      const leads = await listLeadsFiltered();
+      for (const o of pendingUnsent) {
+        const manualSet = new Set(o.manualDriverIds ?? []);
+        const fresh = matchMoversForOrderDetailed(
+          PAYING_CUSTOMERS_PIPELINE_ID,
+          leads,
+          allOpps,
+          o.payload,
+          o.customValues,
+          regionMap,
+          manualSet,
+          { orderStatus: o.status, sentMatchCount: 0 }
+        );
+        o.driverMatchFlags = fresh.driverMatchFlags;
+        o.driverMatchIssues = fresh.driverMatchIssues;
+      }
+    }
+
     const idSet = new Set<string>();
     for (const o of orders) {
       for (const id of o.matchedDriverIds) idSet.add(id);
@@ -47,7 +71,6 @@ export async function GET(req: NextRequest) {
       for (const id of o.manualDriverIds) idSet.add(id);
       for (const id of o.sentMatchDriverIds ?? []) idSet.add(id);
     }
-    const regionMap = await getCityRegionMap();
     const orderMatchUi: Record<string, OrderMatchUiHints> = {};
     for (const o of orders) {
       const cv = o.customValues ?? {};
@@ -61,7 +84,7 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    const opps = await listOpportunities(PAYING_CUSTOMERS_PIPELINE_ID);
+    const opps = allOpps;
     const oppByContact = opportunitiesByContactId(opps);
     const drivers: Record<string, DriverSummary> = {};
     const moverEnrichment: Record<string, MoverMatchEnrichment> = {};

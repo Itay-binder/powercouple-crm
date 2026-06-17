@@ -88,3 +88,39 @@ export function israelTodayAndTomorrowKeys(now = new Date()): { today: string; t
   const tomorrow = `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
   return { today, tomorrow };
 }
+
+/** תחילת יום לוח (00:00) בישראל לפי YYYY-MM-DD → UTC */
+export function jerusalemYmdStartInstant(ymd: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const z = new TZDate(y, mo - 1, d, 0, 0, 0, 0, CRM_TASK_TIMEZONE);
+  return new Date(z.getTime());
+}
+
+/** סוף יום לוח (23:59:59.999) בישראל */
+export function jerusalemYmdEndInstant(ymd: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const z = new TZDate(y, mo - 1, d, 23, 59, 59, 999, CRM_TASK_TIMEZONE);
+  return new Date(z.getTime());
+}
+
+/** האם createdAt (ISO) נופל בתוך אותו יום לוח בישראל כמו ymd */
+export function isoCreatedAtInJerusalemCalendarDay(
+  createdAtIso: string | null | undefined,
+  ymd: string
+): boolean {
+  if (!createdAtIso?.trim()) return false;
+  const t = new Date(createdAtIso).getTime();
+  if (Number.isNaN(t)) return false;
+  const start = jerusalemYmdStartInstant(ymd);
+  const end = jerusalemYmdEndInstant(ymd);
+  if (!start || !end) return false;
+  return t >= start.getTime() && t <= end.getTime();
+}

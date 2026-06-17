@@ -6,6 +6,7 @@ import {
   normalizeParameterSources,
   type TemplateParamSource,
 } from "@/lib/whatsapp/templateParams";
+import { normalizeWhatsAppMetaConfigIds } from "@/lib/whatsapp/metaIds";
 
 const COLLECTION = "integrationSettings";
 const CONFIG_DOC_ID = "whatsappMetaConfig";
@@ -271,14 +272,14 @@ export async function getWhatsAppMetaConfig(db: Firestore): Promise<WhatsAppMeta
   const snap = await db.collection(COLLECTION).doc(CONFIG_DOC_ID).get();
   if (!snap.exists) return null;
   const d = (snap.data() ?? {}) as Record<string, unknown>;
-  return {
+  return normalizeWhatsAppMetaConfigIds({
     appId: asString(d.appId),
     businessAccountId: asString(d.businessAccountId),
     wabaId: asString(d.wabaId),
     phoneNumberId: asString(d.phoneNumberId),
     systemUserToken: asString(d.systemUserToken),
     updatedAt: asString(d.updatedAt),
-  };
+  });
 }
 
 export async function getGreenApiConfig(db: Firestore): Promise<GreenApiConfig | null> {
@@ -327,7 +328,7 @@ export async function saveWhatsAppMetaConfig(
 ): Promise<WhatsAppMetaConfig> {
   const prev = await getWhatsAppMetaConfig(db);
   const now = new Date().toISOString();
-  const next: WhatsAppMetaConfig = {
+  const next = normalizeWhatsAppMetaConfigIds({
     appId: input.appId?.trim() ?? prev?.appId ?? "",
     businessAccountId: input.businessAccountId?.trim() ?? prev?.businessAccountId ?? "",
     wabaId: input.wabaId.trim(),
@@ -337,7 +338,7 @@ export async function saveWhatsAppMetaConfig(
         ? input.systemUserToken.trim()
         : (prev?.systemUserToken ?? ""),
     updatedAt: now,
-  };
+  });
   await db.collection(COLLECTION).doc(CONFIG_DOC_ID).set(next, { merge: true });
   return next;
 }
@@ -898,15 +899,36 @@ export async function deleteWhatsAppAudience(db: Firestore, id: string): Promise
 
 export async function listWhatsAppChatThreads(
   db: Firestore,
-  limit = 80
+  limit: number | null = 80
 ): Promise<WhatsAppChatThreadRecord[]> {
-  const snap = await db
+  const qBase = db
     .collection(CHATS_COLLECTION)
     .orderBy("lastMessageAt", "desc")
-    .limit(Math.max(1, Math.min(200, limit)))
-    .select(...CHAT_THREAD_LIST_FIELDS)
-    .get();
-  const rows = snap.docs
+    .select(...CHAT_THREAD_LIST_FIELDS);
+
+  const docs: Array<{ id: string; data: () => FirebaseFirestore.DocumentData }> = [];
+  if (limit == null) {
+    // "כל השיחות": דפדוף באצוות כדי לאפשר טעינה מלאה של הרשימה.
+    const batchSize = 500;
+    let cursor: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+    // guard מונע טעינה אינסופית במקרה נתונים חריג.
+    const hardCap = 10_000;
+    while (docs.length < hardCap) {
+      let q = qBase.limit(batchSize);
+      if (cursor) q = q.startAfter(cursor);
+      const snap = await q.get();
+      if (snap.empty) break;
+      docs.push(...snap.docs);
+      cursor = snap.docs[snap.docs.length - 1] ?? null;
+      if (snap.size < batchSize) break;
+    }
+  } else {
+    const safeLimit = Math.max(1, Math.min(500, limit));
+    const snap = await qBase.limit(safeLimit).get();
+    docs.push(...snap.docs);
+  }
+
+  const rows = docs
     .map((doc): WhatsAppChatThreadRecord | null => {
       const d = (doc.data() ?? {}) as Record<string, unknown>;
       const phone = asString(d.phone).trim() || doc.id;

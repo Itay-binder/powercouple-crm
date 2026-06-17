@@ -60,8 +60,9 @@ export async function GET(req: NextRequest) {
       const contact = await resolveLeadForChat(thread);
       return NextResponse.json({ ok: true, thread: { ...thread, unreadCount: 0 }, contact });
     }
-    const threads = await listWhatsAppChatThreads(db, 120);
-    return NextResponse.json({ ok: true, threads });
+    const scopeRaw = req.nextUrl.searchParams.get("scope")?.trim().toLowerCase() ?? "recent";
+    const threads = await listWhatsAppChatThreads(db, scopeRaw === "all" ? null : 120);
+    return NextResponse.json({ ok: true, threads, scope: scopeRaw === "all" ? "all" : "recent" });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Unknown error" },

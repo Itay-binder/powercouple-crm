@@ -276,7 +276,7 @@ export async function buildArticleHtml(input: {
       </ul>
       <h2>סיכום</h2>
       <p>זוהי תצוגה מקדימה שנוצרה אוטומטית. כשתגדירו את הקו העיצובי והמידע העסקי, ניתן להחליף את התבנית והטקסטים לפי הסוכן.</p>
-      <footer>נוצר באמצעות סוכן SEO · Power Couple CRM</footer>
+      <footer>נוצר באמצעות סוכן SEO · Liftygo CRM</footer>
     </article>
   </div>
 </body>

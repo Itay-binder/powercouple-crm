@@ -57,6 +57,17 @@ export function driverWorksOnDay(daysStr: string, markers: string[]): boolean {
   return false;
 }
 
+/** כל קבוצה היא כינויים לאותו יום — חובה שכל קבוצה תופיע בשדה ימי העבודה (תאריך הובלה וגם «היום» בהזמנה ממתינה). */
+export function driverWorksOnAllDayGroups(daysStr: string, groups: string[][]): boolean {
+  if (groups.length === 0) return true;
+  const d = daysStr.trim();
+  if (!d) return false;
+  for (const markers of groups) {
+    if (!driverWorksOnDay(d, markers)) return false;
+  }
+  return true;
+}
+
 function expandRegionCandidates(
   cityHints: string[],
   settlementRegionMap: Map<string, string> | undefined

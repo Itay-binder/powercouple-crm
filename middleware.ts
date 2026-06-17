@@ -1,17 +1,39 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  resolveMiddlewareDatabaseId,
-  TENANT_DB_HEADER,
-} from "@/lib/tenant/config";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 
-export function middleware(request: NextRequest) {
-  const databaseId = resolveMiddlewareDatabaseId(request);
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set(TENANT_DB_HEADER, databaseId);
-  return NextResponse.next({
-    request: { headers: requestHeaders },
-  });
+/**
+ * Refresh the Supabase auth session on every request so server components see a
+ * fresh user. Falls back to a plain pass-through if Supabase env is missing.
+ */
+export async function middleware(request: NextRequest) {
+  const response = NextResponse.next({ request });
+
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !anon) return response;
+
+    const supabase = createServerClient(url, anon, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(toSet: { name: string; value: string; options: CookieOptions }[]) {
+          toSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
+
+    // Touch the user to trigger a cookie refresh when needed.
+    await supabase.auth.getUser();
+  } catch {
+    return NextResponse.next({ request });
+  }
+
+  return response;
 }
 
 export const config = {

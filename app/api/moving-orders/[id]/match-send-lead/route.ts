@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
 import { assertMovingOrdersWorkspace } from "@/lib/movingOrders/guard";
 import { enqueueMatchSendFollowupWebhook } from "@/lib/movingOrders/matchSendFollowupWebhook";
-import { applyMatchSendSideEffects } from "@/lib/movingOrders/matchOrderActions";
+import {
+  applyMatchRemoveSideEffects,
+  applyMatchSendSideEffects,
+} from "@/lib/movingOrders/matchOrderActions";
 import { postMatchSendWebhookForDrivers } from "@/lib/movingOrders/postMatchSendWebhook";
 import { getMovingOrder, updateMovingOrder } from "@/lib/movingOrders/repo";
 import type { MovingOrderRecord } from "@/lib/movingOrders/types";
@@ -63,9 +66,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: "מוביל לא שייך להזמנה זו" }, { status: 400 });
   }
 
-  const webhookOk = await postMatchSendWebhookForDrivers(g.db, order, [driverId], false);
-  if (!webhookOk) {
-    return NextResponse.json({ ok: false, error: "לא נמצא ליד למוביל או שליחת הוובהוק נכשלה" }, { status: 400 });
+  if ((order.sentMatchDriverIds ?? []).includes(driverId)) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "המוביל כבר קיבל שליחה להזמנה זו.",
+    });
   }
 
   const on = orderCustomerName(order);
@@ -85,6 +91,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     orderId: order.orderId,
     transportNoteLines,
   });
+
+  const webhookOk = await postMatchSendWebhookForDrivers(g.db, order, [driverId], false);
+  if (!webhookOk) {
+    await applyMatchRemoveSideEffects([driverId]);
+    return NextResponse.json({ ok: false, error: "לא נמצא ליד למוביל או שליחת הוובהוק נכשלה" }, { status: 400 });
+  }
 
   await enqueueMatchSendFollowupWebhook({
     db: g.db,

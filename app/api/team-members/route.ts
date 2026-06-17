@@ -1,0 +1,49 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireApprovedUser } from "@/lib/auth/guard";
+import { createTeamMember, listTeamMembers } from "@/lib/team/repo";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+type ApiErr = { ok: false; error: string };
+
+export async function GET(req: NextRequest) {
+  const auth = await requireApprovedUser(req);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error } satisfies ApiErr,
+      { status: auth.status }
+    );
+  }
+  try {
+    const members = await listTeamMembers();
+    return NextResponse.json({ ok: true, members });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Unknown error" } satisfies ApiErr,
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const auth = await requireApprovedUser(req);
+  if (!auth.ok) {
+    return NextResponse.json(
+      { ok: false, error: auth.error } satisfies ApiErr,
+      { status: auth.status }
+    );
+  }
+  try {
+    const body = (await req.json()) as { name?: string; role?: string };
+    const member = await createTeamMember({
+      name: body.name ?? "",
+      role: body.role ?? "",
+    });
+    return NextResponse.json({ ok: true, member });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "Unknown error" } satisfies ApiErr,
+      { status: 400 }
+    );
+  }
+}

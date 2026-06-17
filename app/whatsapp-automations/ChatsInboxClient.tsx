@@ -207,12 +207,14 @@ function IconWa() {
 }
 
 type MobilePanel = "list" | "chat" | "details";
+type ThreadScope = "session" | "all";
 
 export default function ChatsInboxClient() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [threadScope, setThreadScope] = useState<ThreadScope>("session");
   const [listQuery, setListQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [active, setActive] = useState<ChatThread | null>(null);
@@ -220,9 +222,6 @@ export default function ChatsInboxClient() {
   const [sending, setSending] = useState(false);
   const [crmContact, setCrmContact] = useState<CrmLeadVm | null>(null);
   const [marketingSaving, setMarketingSaving] = useState(false);
-  const [noteDraft, setNoteDraft] = useState("");
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteMsg, setNoteMsg] = useState<string | null>(null);
   const [isNarrow, setIsNarrow] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -256,7 +255,11 @@ export default function ChatsInboxClient() {
   }, [isNarrow, mobilePanel, selectedId]);
 
   const loadThreads = useCallback(async () => {
-    const res = await fetch("/api/whatsapp/chats", { credentials: "include", cache: "no-store" });
+    const scopeParam = threadScope === "all" ? "all" : "recent";
+    const res = await fetch(`/api/whatsapp/chats?scope=${scopeParam}`, {
+      credentials: "include",
+      cache: "no-store",
+    });
     if (res.status === 401) {
       window.location.href = `/login?returnTo=${encodeURIComponent("/whatsapp-automations/chats")}`;
       return;
@@ -268,7 +271,7 @@ export default function ChatsInboxClient() {
     const narrow =
       typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches;
     setSelectedId((prev) => (narrow ? prev : prev || list[0]?.id || ""));
-  }, []);
+  }, [threadScope]);
 
   const loadThread = useCallback(async (id: string) => {
     if (!id) {
@@ -365,8 +368,6 @@ export default function ChatsInboxClient() {
   useEffect(() => {
     prevMsgLenRef.current = 0;
     prevLastMsgIdRef.current = "";
-    setNoteDraft("");
-    setNoteMsg(null);
   }, [selectedId]);
 
   useEffect(() => {
@@ -386,14 +387,18 @@ export default function ChatsInboxClient() {
 
   const filteredThreads = useMemo(() => {
     const q = listQuery.trim().toLowerCase();
-    if (!q) return threads;
-    return threads.filter(
+    let list = threads;
+    if (threadScope === "session") {
+      list = list.filter((t) => sessionOpen(t.lastInboundAt));
+    }
+    if (!q) return list;
+    return list.filter(
       (t) =>
         (t.contactName ?? "").toLowerCase().includes(q) ||
         t.phone.replace(/\D/g, "").includes(q.replace(/\D/g, "")) ||
         (t.lastMessagePreview ?? "").toLowerCase().includes(q)
     );
-  }, [threads, listQuery]);
+  }, [threads, listQuery, threadScope]);
 
   const canSendFreeform = useMemo(() => {
     const inbound = active?.lastInboundAt ?? selectedMeta?.lastInboundAt;
@@ -460,29 +465,6 @@ export default function ChatsInboxClient() {
       setErr(e instanceof Error ? e.message : "עדכון נכשל");
     } finally {
       setMarketingSaving(false);
-    }
-  }
-
-  async function addContactNoteFromChat() {
-    if (!crmContact?.id || !noteDraft.trim()) return;
-    setNoteSaving(true);
-    setNoteMsg(null);
-    setErr(null);
-    try {
-      const res = await fetch(`/api/contacts/${encodeURIComponent(crmContact.id)}/append-note`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: noteDraft.trim(), category: "שיחות" }),
-      });
-      const j = await parseJson<{ ok?: boolean; error?: string }>(res);
-      if (!res.ok || !j.ok) throw new Error(j.error || "הוספת הערה נכשלה");
-      setNoteDraft("");
-      setNoteMsg("הערה נוספה לאיש הקשר.");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "הוספת הערה נכשלה");
-    } finally {
-      setNoteSaving(false);
     }
   }
 
@@ -682,7 +664,43 @@ export default function ChatsInboxClient() {
               </span>
             ) : null}
           </div>
-          <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.hairline}` }}>
+          <div style={{ padding: "8px 10px", borderBottom: `1px solid ${C.hairline}`, display: "grid", gap: 8 }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => setThreadScope("session")}
+                style={{
+                  border: "1px solid " + (threadScope === "session" ? C.hairline2 : C.hairline),
+                  background: threadScope === "session" ? C.selectedList : C.panel,
+                  color: C.text,
+                  borderRadius: 8,
+                  padding: "5px 9px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: font,
+                }}
+              >
+                חלון פתוח
+              </button>
+              <button
+                type="button"
+                onClick={() => setThreadScope("all")}
+                style={{
+                  border: "1px solid " + (threadScope === "all" ? C.hairline2 : C.hairline),
+                  background: threadScope === "all" ? C.selectedList : C.panel,
+                  color: C.text,
+                  borderRadius: 8,
+                  padding: "5px 9px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontFamily: font,
+                }}
+              >
+                כל השיחות
+              </button>
+            </div>
             <div
               style={{
                 display: "flex",
@@ -717,7 +735,11 @@ export default function ChatsInboxClient() {
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             {filteredThreads.length === 0 ? (
               <div style={{ padding: 16, color: C.muted, fontSize: 14 }}>
-                {threads.length === 0 ? "עדיין לא התקבלו התכתבויות." : "אין תוצאות לחיפוש."}
+                {threads.length === 0
+                  ? "עדיין לא התקבלו התכתבויות."
+                  : threadScope === "session"
+                    ? "אין כרגע שיחות בתוך חלון השירות (24 שעות)."
+                    : "אין תוצאות לחיפוש."}
               </div>
             ) : (
               filteredThreads.map((t) => {
@@ -1272,57 +1294,6 @@ export default function ChatsInboxClient() {
                     </dd>
                   </div>
                 ) : null}
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <a
-                    href={`/contacts/${encodeURIComponent(crmContact.id)}`}
-                    style={{
-                      border: `1px solid ${C.hairline2}`,
-                      borderRadius: 8,
-                      padding: "6px 10px",
-                      fontWeight: 700,
-                      textDecoration: "none",
-                      color: C.text,
-                      background: "#fff",
-                    }}
-                  >
-                    פתח איש קשר
-                  </a>
-                </div>
-                <div style={{ marginTop: 12, borderTop: `1px solid ${C.hairline}`, paddingTop: 10 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>הוסף הערה מהשיחה</div>
-                  <textarea
-                    value={noteDraft}
-                    onChange={(e) => setNoteDraft(e.target.value)}
-                    placeholder="רשמי כאן סיכום שיחה/עדכון..."
-                    style={{
-                      width: "100%",
-                      minHeight: 70,
-                      borderRadius: 8,
-                      border: `1px solid ${C.hairline2}`,
-                      padding: "8px 10px",
-                      fontFamily: font,
-                      fontSize: 13,
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void addContactNoteFromChat()}
-                    disabled={noteSaving || !noteDraft.trim()}
-                    style={{
-                      marginTop: 8,
-                      border: "none",
-                      borderRadius: 8,
-                      padding: "8px 12px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      background: "#6d28d9",
-                      color: "#fff",
-                    }}
-                  >
-                    {noteSaving ? "שומר…" : "שמור הערה"}
-                  </button>
-                  {noteMsg ? <div style={{ marginTop: 6, fontSize: 12, color: "#0f766e" }}>{noteMsg}</div> : null}
-                </div>
               </dl>
             ) : (
               <p style={{ margin: 0, color: C.muted, lineHeight: 1.5 }}>

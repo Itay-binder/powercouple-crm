@@ -16,6 +16,49 @@ type MetaGraphError = {
 
 type MetaActionStat = { action_type?: string; value?: string };
 
+/**
+ * סטטוסים לקמפיינים (כולל מצבים שגורמים לקמפיינים להיעלם אם לא נכללים).
+ */
+export const META_CAMPAIGN_LISTABLE_EFFECTIVE_STATUSES: string[] = [
+  "ACTIVE",
+  "PAUSED",
+  "PENDING_REVIEW",
+  "IN_PROCESS",
+  "WITH_ISSUES",
+  "DISAPPROVED",
+  "PENDING_BILLING_INFO",
+  "PREAPPROVED",
+  "ARCHIVED",
+  "CAMPAIGN_PAUSED",
+];
+
+/** סטטוסים תקפים לסדרות מודעות (לא כוללים ערכים ספציפיים לקמפיין). */
+export const META_ADSET_LISTABLE_EFFECTIVE_STATUSES: string[] = [
+  "ACTIVE",
+  "PAUSED",
+  "PENDING_REVIEW",
+  "IN_PROCESS",
+  "WITH_ISSUES",
+  "DISAPPROVED",
+  "PENDING_BILLING_INFO",
+  "PREAPPROVED",
+  "ARCHIVED",
+];
+
+/** סטטוסים תקפים למודעות. */
+export const META_AD_LISTABLE_EFFECTIVE_STATUSES: string[] = [
+  "ACTIVE",
+  "PAUSED",
+  "PENDING_REVIEW",
+  "IN_PROCESS",
+  "WITH_ISSUES",
+  "DISAPPROVED",
+  "PREAPPROVED",
+  "ARCHIVED",
+  "ADSET_PAUSED",
+  "CAMPAIGN_PAUSED",
+];
+
 // ── Campaigns ────────────────────────────────────────────────────────────────
 
 type MetaCampaignInsight = {
@@ -25,6 +68,7 @@ type MetaCampaignInsight = {
   inline_link_clicks?: string;
   inline_link_click_ctr?: string;
   cost_per_inline_link_click?: string;
+  account_currency?: string;
   actions?: MetaActionStat[];
 };
 
@@ -85,6 +129,8 @@ type MetaAdSetNode = {
   daily_budget?: string;
   lifetime_budget?: string;
   optimization_goal?: string;
+  bid_strategy?: string;
+  bid_amount?: string;
   insights?: { data?: MetaAdSetInsight[] };
 };
 
@@ -96,6 +142,10 @@ export type MetaAdSetVm = {
   campaignId: string;
   campaignName: string;
   optimizationGoal: string;
+  /** אסטרטגיית הצעות מחיר מ-Meta (למשל LOWEST_COST_WITH_BID_CAP). */
+  bidStrategy: string;
+  /** סכום ביד-קאפ / עלות יעד ביחידות מטבע (כמו dailyBudget). */
+  bidAmount: number;
   spend: number;
   impressions: number;
   reach: number;
@@ -107,6 +157,21 @@ export type MetaAdSetVm = {
   lifetimeBudget: number;
   results: number;
 };
+
+/** נתוני ביד-קאפ לעדכון (מטבע — minor units ב-Meta, כאן אנו שומרים minor בבירור). */
+export type MetaAdSetBidMeta = {
+  id: string;
+  bidStrategy: string;
+  /** ערך גולמי מ־API (אגורות/סנטים). */
+  bidAmountMinor: number;
+};
+
+/** סדרת מודעות שבה אפשר לשלוט בביד-קאפ דרך ה-API (כאשר מוגדר או אסטרטגיה רלוונטית). */
+export function metaAdSetEligibleForBidCap(meta: { bidStrategy: string; bidAmountMinor: number }): boolean {
+  if (meta.bidAmountMinor > 0) return true;
+  const st = (meta.bidStrategy || "").toUpperCase();
+  return st === "LOWEST_COST_WITH_BID_CAP" || st === "COST_CAP";
+}
 
 // ── Ads ───────────────────────────────────────────────────────────────────────
 
@@ -156,17 +221,17 @@ function graphBaseUrl(): string {
   return process.env.META_GRAPH_API_BASE?.trim() || "https://graph.facebook.com/v22.0";
 }
 
-function toNum(raw?: string): number {
-  const n = Number.parseFloat((raw ?? "").trim());
+function toNum(raw?: string | number | null): number {
+  const n = Number.parseFloat(String(raw ?? "").trim());
   return Number.isFinite(n) ? n : 0;
 }
 
-function toInt(raw?: string): number {
-  const n = Number.parseInt((raw ?? "").trim(), 10);
+function toInt(raw?: string | number | null): number {
+  const n = Number.parseInt(String(raw ?? "").trim(), 10);
   return Number.isFinite(n) ? n : 0;
 }
 
-function budgetToCurrency(raw?: string): number {
+function budgetToCurrency(raw?: string | number | null): number {
   const cents = toNum(raw);
   return cents > 0 ? cents / 100 : 0;
 }
@@ -284,10 +349,13 @@ export async function validateMetaToken(config: MetaAdsConfig): Promise<MetaToke
 
 // ── Campaigns ─────────────────────────────────────────────────────────────────
 
-export async function listActiveMetaAdsCampaigns(
+/**
+ * רשימת קמפיינים + מטבע מ־insights (account_currency).
+ */
+export async function listActiveMetaAdsCampaignsWithCurrency(
   config: MetaAdsConfig,
-  datePreset = "last_7d"
-): Promise<MetaAdsCampaignVm[]> {
+  datePreset: string
+): Promise<{ rows: MetaAdsCampaignVm[]; currency: string }> {
   const adAccountId = normalizeAdAccountId(config.adAccountId);
   if (!adAccountId.trim()) throw new Error("חסר Ad Account ID.");
   if (!config.accessToken.trim()) throw new Error("חסר Access Token.");
@@ -296,11 +364,11 @@ export async function listActiveMetaAdsCampaigns(
     "id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,updated_time," +
     "insights.date_preset(" +
     datePreset +
-    "){spend,impressions,reach,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions}";
+    "){spend,impressions,reach,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions,account_currency}";
   const query = new URLSearchParams({
     fields,
-    limit: "200",
-    effective_status: JSON.stringify(["ACTIVE", "PAUSED", "PENDING_REVIEW", "IN_PROCESS"]),
+    limit: "500",
+    effective_status: JSON.stringify(META_CAMPAIGN_LISTABLE_EFFECTIVE_STATUSES),
   });
 
   const json = await callMetaGraph<{ data?: MetaCampaignNode[] }>(
@@ -308,8 +376,16 @@ export async function listActiveMetaAdsCampaigns(
     `/act_${adAccountId}/campaigns`,
     query
   );
-  const rows = Array.isArray(json.data) ? json.data : [];
-  return rows
+  const rawRows = Array.isArray(json.data) ? json.data : [];
+  let currency = "ILS";
+  for (const r of rawRows) {
+    const ac = r.insights?.data?.[0]?.account_currency?.trim();
+    if (ac) {
+      currency = ac;
+      break;
+    }
+  }
+  const rows = rawRows
     .filter((r) => r.id)
     .map((r) => {
       const insight = r.insights?.data?.[0];
@@ -334,6 +410,53 @@ export async function listActiveMetaAdsCampaigns(
       };
     })
     .sort((a, b) => b.spend - a.spend || b.impressions - a.impressions);
+  return { rows, currency };
+}
+
+export async function listActiveMetaAdsCampaigns(
+  config: MetaAdsConfig,
+  datePreset = "last_7d"
+): Promise<MetaAdsCampaignVm[]> {
+  const { rows } = await listActiveMetaAdsCampaignsWithCurrency(config, datePreset);
+  return rows;
+}
+
+export async function metaAdsActiveCampaignCount(config: MetaAdsConfig): Promise<number> {
+  const adAccountId = normalizeAdAccountId(config.adAccountId);
+  if (!adAccountId.trim() || !config.accessToken.trim()) return 0;
+  const query = new URLSearchParams({
+    fields: "id",
+    limit: "500",
+    effective_status: JSON.stringify(["ACTIVE"]),
+  });
+  const json = await callMetaGraph<{ data?: Array<{ id?: string }> }>(
+    config,
+    `/act_${adAccountId}/campaigns`,
+    query
+  );
+  return Array.isArray(json.data) ? json.data.filter((x) => x.id).length : 0;
+}
+
+export type MetaAdsTodaySnapshot = {
+  spendToday: number;
+  currency: string;
+  activeCampaigns: number;
+  campaignsWithSpendToday: number;
+};
+
+export async function getMetaAdsTodaySnapshot(config: MetaAdsConfig): Promise<MetaAdsTodaySnapshot> {
+  const [{ rows, currency }, activeCount] = await Promise.all([
+    listActiveMetaAdsCampaignsWithCurrency(config, "today"),
+    metaAdsActiveCampaignCount(config),
+  ]);
+  const spendToday = rows.reduce((s, r) => s + r.spend, 0);
+  const campaignsWithSpendToday = rows.filter((r) => r.spend > 0).length;
+  return {
+    spendToday,
+    currency,
+    activeCampaigns: activeCount,
+    campaignsWithSpendToday,
+  };
 }
 
 // ── Ad Sets ───────────────────────────────────────────────────────────────────
@@ -347,13 +470,14 @@ export async function listAdSets(
 
   const fields =
     "id,name,status,effective_status,campaign_id,campaign{name},daily_budget,lifetime_budget,optimization_goal," +
+    "bid_strategy,bid_amount," +
     "insights.date_preset(" +
     datePreset +
     "){spend,impressions,reach,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,cpm,actions}";
   const query = new URLSearchParams({
     fields,
     limit: "200",
-    effective_status: JSON.stringify(["ACTIVE", "PAUSED", "PENDING_REVIEW", "IN_PROCESS"]),
+    effective_status: JSON.stringify(META_ADSET_LISTABLE_EFFECTIVE_STATUSES),
   });
 
   const json = await callMetaGraph<{ data?: MetaAdSetNode[] }>(
@@ -374,6 +498,8 @@ export async function listAdSets(
         campaignId: (r.campaign_id ?? "").trim(),
         campaignName: (r.campaign?.name ?? "").trim(),
         optimizationGoal: (r.optimization_goal ?? "").trim(),
+        bidStrategy: (r.bid_strategy ?? "").trim(),
+        bidAmount: budgetToCurrency(r.bid_amount),
         spend: toNum(insight?.spend),
         impressions: toInt(insight?.impressions),
         reach: toInt(insight?.reach),
@@ -387,6 +513,61 @@ export async function listAdSets(
       };
     })
     .sort((a, b) => b.spend - a.spend);
+}
+
+/** סדרות מודעות תחת קמפיין — שדות ביד-קאפ בלבד (ללא insights). */
+export async function listAdSetBidMetasInCampaign(
+  config: MetaAdsConfig,
+  campaignId: string
+): Promise<MetaAdSetBidMeta[]> {
+  const cid = campaignId.trim();
+  if (!cid) throw new Error("חסר מזהה קמפיין.");
+  const query = new URLSearchParams({
+    fields: "id,bid_strategy,bid_amount",
+    limit: "500",
+  });
+  const json = await callMetaGraph<{
+    data?: Array<{ id?: string; bid_strategy?: string; bid_amount?: string }>;
+  }>(config, `/${cid}/adsets`, query);
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows
+    .filter((r) => r.id)
+    .map((r) => ({
+      id: (r.id ?? "").trim(),
+      bidStrategy: (r.bid_strategy ?? "").trim(),
+      bidAmountMinor: toInt(r.bid_amount),
+    }));
+}
+
+function minorUnitsFromShekels(shekels: number): number {
+  return Math.max(1, Math.round(shekels * 100));
+}
+
+/** מעדכן ביד-קאפ או cost cap (לפי bid_strategy של הסדרה). */
+export async function updateAdSetBidCapForShekels(
+  config: MetaAdsConfig,
+  adSet: MetaAdSetBidMeta,
+  shekels: number
+): Promise<void> {
+  const base = graphBaseUrl().replace(/\/$/, "");
+  const minor = minorUnitsFromShekels(shekels);
+  const st = (adSet.bidStrategy || "").toUpperCase();
+  const body = new URLSearchParams({ access_token: config.accessToken });
+  if (st === "COST_CAP") {
+    body.set("cost_cap", String(minor));
+  } else {
+    body.set("bid_amount", String(minor));
+  }
+  const res = await fetch(`${base}/${adSet.id}`, { method: "POST", body, cache: "no-store" });
+  const json = (await res.json().catch(() => ({}))) as { success?: boolean; error?: MetaGraphError };
+  if (!res.ok || json.success === false) {
+    const msg =
+      json.error?.error_user_msg?.trim() ||
+      json.error?.error_user_title?.trim() ||
+      json.error?.message?.trim() ||
+      `Meta API error (${res.status})`;
+    throw new Error(msg);
+  }
 }
 
 // ── Ads ───────────────────────────────────────────────────────────────────────
@@ -406,7 +587,7 @@ export async function listAds(
   const query = new URLSearchParams({
     fields,
     limit: "200",
-    effective_status: JSON.stringify(["ACTIVE", "PAUSED", "PENDING_REVIEW", "IN_PROCESS"]),
+    effective_status: JSON.stringify(META_AD_LISTABLE_EFFECTIVE_STATUSES),
   });
 
   const json = await callMetaGraph<{ data?: MetaAdNode[] }>(

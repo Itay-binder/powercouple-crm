@@ -11,7 +11,7 @@ import {
 } from "@/lib/leads/repo";
 import type { AudienceCondition, AudienceLogic } from "@/lib/whatsapp/audienceFilter";
 import { filterLeadsByAudience } from "@/lib/whatsapp/audienceFilter";
-import { assertPhoneNumberBelongsToWaba, sendTemplateMessageViaMeta } from "@/lib/whatsapp/meta";
+import { assertWhatsAppMetaGraphIdsAndAccess, sendTemplateMessageViaMeta } from "@/lib/whatsapp/meta";
 import { buildTemplateParametersForLead } from "@/lib/whatsapp/templateParams";
 import {
   appendWhatsAppCampaign,
@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
     conditions?: AudienceCondition[];
     logic?: AudienceLogic;
     draftId?: string;
+    idempotencyKey?: string;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -89,6 +90,7 @@ export async function POST(req: NextRequest) {
   }
 
   const draftId = body.draftId?.trim() ?? "";
+  const idempotencyKey = body.idempotencyKey?.trim() ?? "";
   let templateId = body.templateId?.trim() ?? "";
   let parameterValues = Array.isArray(body.parameterValues)
     ? body.parameterValues.map((x) => String(x ?? "").trim())
@@ -98,6 +100,30 @@ export async function POST(req: NextRequest) {
 
   try {
     const db = await getAdminDb();
+    const sendReqDoc =
+      idempotencyKey && /^[A-Za-z0-9_.:-]{8,120}$/.test(idempotencyKey)
+        ? db.collection("integrationSettings").doc(`waSendReq:${idempotencyKey}`)
+        : null;
+
+    if (sendReqDoc) {
+      const existing = await sendReqDoc.get();
+      if (existing.exists) {
+        const d = (existing.data() ?? {}) as Record<string, unknown>;
+        const status = String(d.status ?? "").trim().toLowerCase();
+        if (status === "done" && d.campaign && typeof d.campaign === "object") {
+          return NextResponse.json({ ok: true, campaign: d.campaign, deduped: true });
+        }
+        return NextResponse.json(
+          { ok: false, error: "שליחה זהה כבר בתהליך. המתן רגע ונסה לרענן היסטוריה." },
+          { status: 409 }
+        );
+      }
+      await sendReqDoc.set({
+        status: "processing",
+        createdAt: new Date().toISOString(),
+        createdBy: auth.user.email ?? auth.user.uid,
+      });
+    }
 
     let useAudienceFilter = false;
     let audienceConditions: AudienceCondition[] = [];
@@ -215,7 +241,7 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    await assertPhoneNumberBelongsToWaba(config);
+    await assertWhatsAppMetaGraphIdsAndAccess(config);
     const template = templates.find((t) => t.id === templateId);
     if (!template) {
       return NextResponse.json({ ok: false, error: "Template not found" }, { status: 404 });
@@ -325,8 +351,25 @@ export async function POST(req: NextRequest) {
     };
     try {
       await appendWhatsAppCampaign(db, campaign);
+      if (sendReqDoc) {
+        await sendReqDoc.set(
+          { status: "done", campaign, doneAt: new Date().toISOString() },
+          { merge: true }
+        );
+      }
       return NextResponse.json({ ok: true, campaign });
     } catch (e) {
+      if (sendReqDoc) {
+        await sendReqDoc.set(
+          {
+            status: "done",
+            campaign,
+            doneAt: new Date().toISOString(),
+            warning: e instanceof Error ? e.message : "History save failed",
+          },
+          { merge: true }
+        );
+      }
       return NextResponse.json({
         ok: true,
         campaign,

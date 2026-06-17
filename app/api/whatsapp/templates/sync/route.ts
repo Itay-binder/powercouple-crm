@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApprovedUser } from "@/lib/auth/guard";
 import { isAdminEmail } from "@/lib/auth/profile";
 import { getAdminDb } from "@/lib/firebase/admin";
-import { assertPhoneNumberBelongsToWaba, listTemplatesFromMeta } from "@/lib/whatsapp/meta";
+import { listTemplatesFromMeta } from "@/lib/whatsapp/meta";
 import {
   getWhatsAppMetaConfig,
   listWhatsAppTemplates,
@@ -42,8 +42,6 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    await assertPhoneNumberBelongsToWaba(config);
 
     const [metaTemplates, localTemplates] = await Promise.all([
       listTemplatesFromMeta(config),

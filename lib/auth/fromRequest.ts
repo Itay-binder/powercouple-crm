@@ -1,32 +1,47 @@
 import type { NextRequest } from "next/server";
-import { getAdminAuth } from "@/lib/firebase/admin";
-import { SESSION_COOKIE } from "@/lib/auth/session";
+import { createServerClient } from "@supabase/ssr";
 
 /**
- * אימות לפי:
- * - cookie session (מועדף)
- * - או Authorization: Bearer <Firebase idToken> (כש-iframe חוסם cookies)
+ * Verify the request's authenticated user via:
+ * - Supabase session cookies (preferred), or
+ * - Authorization: Bearer <supabase access token> (when cookies are blocked, e.g. iframe).
  */
 export async function getVerifiedAuthFromRequest(
   req: NextRequest
 ): Promise<{ uid: string; email?: string } | null> {
-  const cookie = req.cookies.get(SESSION_COOKIE)?.value;
-  if (cookie) {
-    try {
-      const decoded = await getAdminAuth().verifySessionCookie(cookie, true);
-      return { uid: decoded.uid, email: decoded.email };
-    } catch {
-      // fallback to bearer
-    }
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) return null;
+
+  const supabase = createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll();
+      },
+      setAll() {
+        // Read-only verification — no cookie writes here.
+      },
+    },
+  });
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) return { uid: user.id, email: user.email ?? undefined };
+  } catch {
+    // fall through to bearer
   }
 
   const authHeader = req.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
-    const idToken = authHeader.slice(7).trim();
-    if (!idToken) return null;
+    const token = authHeader.slice(7).trim();
+    if (!token) return null;
     try {
-      const decoded = await getAdminAuth().verifyIdToken(idToken);
-      return { uid: decoded.uid, email: decoded.email };
+      const {
+        data: { user },
+      } = await supabase.auth.getUser(token);
+      if (user) return { uid: user.id, email: user.email ?? undefined };
     } catch {
       return null;
     }
@@ -34,4 +49,3 @@ export async function getVerifiedAuthFromRequest(
 
   return null;
 }
-

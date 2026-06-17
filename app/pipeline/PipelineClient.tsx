@@ -109,7 +109,7 @@ type Opportunity = {
   labels?: Array<{ id: string; name: string; color: string }>;
   tags?: string[];
   lastLeadAt?: string | null;
-  /** תאריך פעילות אחרונה במסמך הליד של איש הקשר (לא lastLeadAt של הלקוח) */
+  /** תאריך פעילות אחרונה במסמך הליד של איש הקשר (לא lastLeadAt של ההזדמנות) */
   contactLastLeadAt?: string | null;
   customValues?: Record<string, unknown>;
   createdAt: string | null;
@@ -126,6 +126,7 @@ type NoteItem = {
   createdBy?: string;
   attachments?: Array<{ id: string; fileName: string; url: string }>;
 };
+type NotesViewFilter = "all" | "orders" | "tasks" | "calls";
 type TaskItem = {
   id: string;
   title: string;
@@ -138,14 +139,37 @@ type TaskItem = {
   syncToGoogleCalendar?: boolean;
   googleCalendarId?: string;
 };
-type JotformSubmissionItem = {
-  id: string;
-  submissionId: string;
-  formId: string;
-  driveFolderUrl?: string;
-  submittedAt: string;
-  answers: Array<{ questionId: string; label: string; type: string; value: string; fileUrls: string[] }>;
-};
+
+function isOrderFlowNote(note: NoteItem): boolean {
+  const by = (note.createdBy ?? "").trim();
+  const txt = (note.text ?? "").trim();
+  if (by === "התאמת הזמנות" || by === "זיכוי הזמנה") return true;
+  return txt.includes("הזמנה:") || txt.includes("זיכוי ליד");
+}
+
+function isTaskFlowNote(note: NoteItem): boolean {
+  const by = (note.createdBy ?? "").trim();
+  const txt = (note.text ?? "").trim();
+  return by.includes("משימה") || txt.includes("משימה");
+}
+
+function isCallsFlowNote(note: NoteItem): boolean {
+  const by = (note.createdBy ?? "").trim();
+  const txt = (note.text ?? "").trim();
+  if (by === "ניהול שיחות") return true;
+  return (
+    txt.includes("שיחה חדשה נקבעה") ||
+    txt.includes("שיחה בוצעה") ||
+    txt.includes("פולואפ שיחה")
+  );
+}
+
+function notePassesFilter(note: NoteItem, filter: NotesViewFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "orders") return isOrderFlowNote(note);
+  if (filter === "calls") return isCallsFlowNote(note);
+  return isTaskFlowNote(note);
+}
 
 type GCalOptOpp = { id: string; summary?: string; primary?: boolean };
 
@@ -206,7 +230,8 @@ function payingCustomersCustomFieldRank(fieldId: string): number {
     ["mover_same_day", 10],
     ["leads_count", 11],
     ["package_current_leads_count", 12],
-    ["work_availability_status", 13],
+    ["package_current_leads_count_sent", 13],
+    ["work_availability_status", 14],
   ]);
   return ranks.get(k) ?? Number.MAX_SAFE_INTEGER;
 }
@@ -342,7 +367,7 @@ async function fetchPipelineBootstrap(selectedPipelineId: string) {
   };
 
   if (!pJson.ok) throw new Error(pJson.error ?? "שגיאה בטעינת pipelines");
-  if (!oJson.ok) throw new Error(oJson.error ?? "שגיאה בטעינת לקוחות");
+  if (!oJson.ok) throw new Error(oJson.error ?? "שגיאה בטעינת opportunities");
   if (!cJson.ok) throw new Error(cJson.error ?? "שגיאה בטעינת contacts");
 
   const p = pJson.pipelines ?? [];
@@ -423,8 +448,6 @@ function mergeVisibleColsWithNewKeys(
 
 export default function PipelineClient() {
   const searchParams = useSearchParams();
-  const urlPipelineId = searchParams.get("pipelineId")?.trim() ?? "";
-  const urlStageFocus = searchParams.get("stage")?.trim() ?? "";
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("opportunities");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -457,12 +480,12 @@ export default function PipelineClient() {
   const [manageOppColsOpen, setManageOppColsOpen] = useState(false);
   const [oppDragIndex, setOppDragIndex] = useState<number | null>(null);
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
-  const [oppDetailTab, setOppDetailTab] = useState<"details" | "notes" | "tasks" | "jotform" | "whatsapp" | "greenapi">(
+  const [oppDetailTab, setOppDetailTab] = useState<"details" | "notes" | "tasks" | "whatsapp" | "greenapi">(
     "details"
   );
+  const [oppNotesFilter, setOppNotesFilter] = useState<NotesViewFilter>("all");
   const [oppNotes, setOppNotes] = useState<NoteItem[]>([]);
   const [oppTasks, setOppTasks] = useState<TaskItem[]>([]);
-  const [oppJotformSubmissions, setOppJotformSubmissions] = useState<JotformSubmissionItem[]>([]);
   const [oppTaskModal, setOppTaskModal] = useState<
     null | { mode: "new" } | { mode: "edit"; task: TaskItem }
   >(null);
@@ -470,6 +493,7 @@ export default function PipelineClient() {
   const [oppTfDue, setOppTfDue] = useState("");
   const [oppTfRem, setOppTfRem] = useState("");
   const [oppTfStatus, setOppTfStatus] = useState<"todo" | "in_progress" | "done">("todo");
+  const [oppTaskNote, setOppTaskNote] = useState("");
   const [oppGcalLoading, setOppGcalLoading] = useState(false);
   const [oppGcalConnected, setOppGcalConnected] = useState(false);
   const [oppGcalList, setOppGcalList] = useState<GCalOptOpp[]>([]);
@@ -527,12 +551,8 @@ export default function PipelineClient() {
 
   const oppForSelectedPipeline = useMemo(() => {
     if (!selectedPipelineId) return opportunities;
-    let rows = opportunities.filter((o) => o.pipelineId === selectedPipelineId);
-    if (urlStageFocus) {
-      rows = rows.filter((o) => (o.stage || "—") === urlStageFocus);
-    }
-    return rows;
-  }, [opportunities, selectedPipelineId, urlStageFocus]);
+    return opportunities.filter((o) => o.pipelineId === selectedPipelineId);
+  }, [opportunities, selectedPipelineId]);
 
   const grouped = useMemo(() => {
     const map: Record<string, Opportunity[]> = {};
@@ -547,13 +567,6 @@ export default function PipelineClient() {
     }
     return map;
   }, [oppForSelectedPipeline, selectedPipeline]);
-
-  useEffect(() => {
-    if (!urlPipelineId || pipelines.length === 0) return;
-    if (pipelines.some((p) => p.id === urlPipelineId)) {
-      setSelectedPipelineId(urlPipelineId);
-    }
-  }, [urlPipelineId, pipelines]);
 
   const {
     data: pipelineData,
@@ -755,6 +768,7 @@ export default function PipelineClient() {
       setOppTfDue("");
       setOppTfRem("");
       setOppTfStatus("todo");
+      setOppTaskNote("");
       return;
     }
     const t = oppTaskModal.task;
@@ -762,6 +776,7 @@ export default function PipelineClient() {
     setOppTfDue(toLocalInputOppTask(t.dueAt));
     setOppTfRem(toLocalInputOppTask(t.reminderAt ?? ""));
     setOppTfStatus((t.status ?? (t.done ? "done" : "todo")) as "todo" | "in_progress" | "done");
+    setOppTaskNote("");
   }, [oppTaskModal]);
 
   useEffect(() => {
@@ -921,7 +936,7 @@ export default function PipelineClient() {
         }),
       });
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !j.ok) throw new Error(j.error ?? "יצירת לקוח נכשלה");
+      if (!res.ok || !j.ok) throw new Error(j.error ?? "יצירת הזדמנות נכשלה");
       setCreateOpportunityOpen(false);
       setNewOppName("");
       setNewOppContactId("");
@@ -931,7 +946,7 @@ export default function PipelineClient() {
       setNewOppLabelIds([]);
       await mutatePipeline();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "יצירת לקוח נכשלה");
+      setErr(e instanceof Error ? e.message : "יצירת הזדמנות נכשלה");
     }
   }
 
@@ -946,25 +961,12 @@ export default function PipelineClient() {
       opportunity?: Opportunity & { notes?: NoteItem[]; tasks?: TaskItem[] };
     };
     if (!res.ok || !j.ok || !j.opportunity) {
-      setErr(j.error ?? "טעינת לקוח נכשלה");
+      setErr(j.error ?? "טעינת הזדמנות נכשלה");
       return;
     }
     setSelectedOpp(j.opportunity);
     setOppNotes(j.opportunity.notes ?? []);
     setOppTasks(j.opportunity.tasks ?? []);
-    const jotRes = await fetch(`/api/jotform/submissions?opportunityId=${encodeURIComponent(id)}`, {
-      credentials: "include",
-      cache: "no-store",
-    }).catch(() => null);
-    if (jotRes) {
-      const jotJson = (await jotRes.json().catch(() => ({}))) as {
-        ok?: boolean;
-        submissions?: JotformSubmissionItem[];
-      };
-      setOppJotformSubmissions(jotRes.ok && jotJson.ok ? (jotJson.submissions ?? []) : []);
-    } else {
-      setOppJotformSubmissions([]);
-    }
     setOppDetailTab("details");
   }
 
@@ -1008,7 +1010,7 @@ export default function PipelineClient() {
       opportunity?: Opportunity & { notes?: NoteItem[]; tasks?: TaskItem[] };
     };
     if (!res.ok || !j.ok || !j.opportunity) {
-      setErr(j.error ?? "שמירת לקוח נכשלה");
+      setErr(j.error ?? "שמירת הזדמנות נכשלה");
       return;
     }
     if (options?.showSavedToast) {
@@ -1094,8 +1096,8 @@ export default function PipelineClient() {
 
   function opportunityFieldLabel(col: string): string {
     const labels: Record<string, string> = {
-      opportunityCode: "מספר לקוח",
-      name: "שם לקוח",
+      opportunityCode: "מספר הזדמנות",
+      name: "שם הזדמנות",
       contactName: "איש קשר",
       email: "מייל",
       phone: "פלאפון",
@@ -1113,6 +1115,7 @@ export default function PipelineClient() {
       updatedAt: "עודכן",
       contactLastLeadAt: "ליד אחרון (איש קשר)",
       [MOVER_OPPORTUNITY_FIELD_IDS.leadsCount]: "מספר פניות (לידים)",
+      [MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCount]: "כמות לידים יומית",
     };
     return labels[col] ?? oppCustomFieldLabelById[col] ?? col;
   }
@@ -1132,7 +1135,7 @@ export default function PipelineClient() {
     const out: Record<string, AdvFieldKind> = {};
     const rowsToInspect = oppForSelectedPipeline.slice(0, 120);
     for (const col of oppDisplayCols) {
-      if (col === MOVER_OPPORTUNITY_FIELD_IDS.leadsCount) {
+      if (col === MOVER_OPPORTUNITY_FIELD_IDS.leadsCount || col === MOVER_OPPORTUNITY_FIELD_IDS.dailyLeadsCount) {
         out[col] = "number";
         continue;
       }
@@ -1416,8 +1419,8 @@ export default function PipelineClient() {
       const failCount = Array.isArray(j.failed) ? j.failed.length : 0;
       setToastMessage(
         failCount > 0
-          ? `עודכנו ${j.updated ?? 0} לקוחות (${failCount} נכשלו)`
-          : `עודכנו ${j.updated ?? 0} לקוחות`
+          ? `עודכנו ${j.updated ?? 0} הזדמנויות (${failCount} נכשלו)`
+          : `עודכנו ${j.updated ?? 0} הזדמנויות`
       );
       setSelectedOppIds([]);
       await mutatePipeline();
@@ -1451,8 +1454,8 @@ export default function PipelineClient() {
       const failCount = Array.isArray(j.failed) ? j.failed.length : 0;
       setToastMessage(
         failCount > 0
-          ? `נמחקו ${j.deleted ?? 0} לקוחות (${failCount} נכשלו)`
-          : `נמחקו ${j.deleted ?? 0} לקוחות`
+          ? `נמחקו ${j.deleted ?? 0} הזדמנויות (${failCount} נכשלו)`
+          : `נמחקו ${j.deleted ?? 0} הזדמנויות`
       );
       setBulkDeleteOpen(false);
       setBulkDeleteConfirm("");
@@ -1574,10 +1577,10 @@ export default function PipelineClient() {
   return (
     <div style={{ width: "100%", maxWidth: "100%", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>ניהול לקוחות</h1>
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>ניהול הזדמנויות</h1>
         <div style={{ display: "inline-flex", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 4 }}>
           <button type="button" onClick={() => setTab("opportunities")} style={{ padding: "8px 12px", border: "none", borderRadius: 8, background: tab === "opportunities" ? "#e9d5ff" : "transparent", fontWeight: 800, cursor: "pointer" }}>
-            לקוחות
+            הזדמנויות
           </button>
           <button type="button" onClick={() => setTab("pipelines")} style={{ padding: "8px 12px", border: "none", borderRadius: 8, background: tab === "pipelines" ? "#e9d5ff" : "transparent", fontWeight: 800, cursor: "pointer" }}>
             פייפליינים
@@ -1588,7 +1591,7 @@ export default function PipelineClient() {
         {tab === "opportunities" && (
           <>
             <span style={{ fontWeight: 800, color: "#0c4a6e", background: "#e0f2fe", borderRadius: 999, padding: "4px 10px", fontSize: 12 }}>
-              {oppForSelectedPipeline.length} לקוחות
+              {oppForSelectedPipeline.length} opportunities
             </span>
             <select value={selectedPipelineId} onChange={(e) => setSelectedPipelineId(e.target.value)} style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #e5e7eb", minWidth: 220 }}>
               {pipelines.map((p) => (
@@ -1654,7 +1657,7 @@ export default function PipelineClient() {
               }}
             >
               <div style={{ fontWeight: 900, marginInlineEnd: 6 }}>
-                נבחרו {selectedOppIds.length} לקוחות
+                נבחרו {selectedOppIds.length} הזדמנויות
               </div>
               <select
                 value={bulkStage}
@@ -1771,7 +1774,7 @@ export default function PipelineClient() {
                         type="checkbox"
                         checked={filteredSortedOpps.length > 0 && selectedVisibleCount === filteredSortedOpps.length}
                         onChange={(e) => toggleSelectAllVisible(e.target.checked)}
-                        aria-label="בחירת כל הלקוחות המוצגים"
+                        aria-label="בחירת כל ההזדמנויות המוצגות"
                       />
                     </th>
                     {oppDisplayCols.map((h) => (
@@ -1823,7 +1826,7 @@ export default function PipelineClient() {
                           type="checkbox"
                           checked={selectedOppIds.includes(o.id)}
                           onChange={(e) => toggleOppSelection(o.id, e.target.checked)}
-                          aria-label={`בחירת לקוח ${o.name}`}
+                          aria-label={`בחירת הזדמנות ${o.name}`}
                         />
                       </td>
                       {oppDisplayCols.map((col, idx) => (
@@ -1954,7 +1957,7 @@ export default function PipelineClient() {
                       ))}
                     </tr>
                   ))}
-                  {!loading && filteredSortedOpps.length === 0 && <tr><td colSpan={Math.max(oppDisplayCols.length + 1, 1)} style={{ padding: 16, color: "#6b7280", fontWeight: 700 }}>אין לקוחות בפייפליין הנבחר.</td></tr>}
+                  {!loading && filteredSortedOpps.length === 0 && <tr><td colSpan={Math.max(oppDisplayCols.length + 1, 1)} style={{ padding: 16, color: "#6b7280", fontWeight: 700 }}>אין הזדמנויות בפייפליין הנבחר.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -1990,7 +1993,7 @@ export default function PipelineClient() {
                         }}
                       >
                         {list.length === 0 ? (
-                          <div style={{ color: "#9ca3af", fontWeight: 700, fontSize: 12 }}>אין לקוחות כאן</div>
+                          <div style={{ color: "#9ca3af", fontWeight: 700, fontSize: 12 }}>אין הזדמנויות כאן</div>
                         ) : (
                           list.map((o) => (
                             <div
@@ -2217,7 +2220,7 @@ export default function PipelineClient() {
                       }
                       const prevStage = editStages[i - 1] || editStages[0];
                       const ok = window.confirm(
-                        `למחוק את השלב "${s}"?\nהלקוחות בשלב זה יעברו לשלב הקודם: "${prevStage}".`
+                        `למחוק את השלב "${s}"?\nההזדמנויות בשלב זה יעברו לשלב הקודם: "${prevStage}".`
                       );
                       if (!ok) return;
                       setEditStages((arr) => arr.filter((_, idx) => idx !== i));
@@ -2333,7 +2336,7 @@ export default function PipelineClient() {
             style={{ width: "min(400px, 94vw)", background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", padding: 16, maxHeight: "90vh", overflow: "auto" }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>תגיות ללקוחות</h3>
+            <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>תגיות להזדמנות</h3>
             <LabelPicker
               labels={catalogLabels}
               selectedIds={labelPickDraft}
@@ -2396,7 +2399,7 @@ export default function PipelineClient() {
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.2)" }} onMouseDown={() => setManageOppColsOpen(false)} />
           <div style={{ position: "absolute", top: 0, right: 0, height: "100%", width: "min(420px, 94vw)", overflow: "auto", background: "#fff", borderLeft: "1px solid #e5e7eb", padding: 16 }} onMouseDown={(e) => e.stopPropagation()}>
             <h3 style={{ margin: 0, marginBottom: 10 }}>
-              {viewMode === "board" ? "ניהול שדות (תצוגת פייפליין)" : "ניהול עמודות (לקוחות)"}
+              {viewMode === "board" ? "ניהול שדות (תצוגת פייפליין)" : "ניהול עמודות (הזדמנויות)"}
             </h3>
             {viewMode === "board" ? (
               <div style={{ display: "grid", gap: 8 }}>
@@ -2541,7 +2544,7 @@ export default function PipelineClient() {
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: 0, marginBottom: 10 }}>פילטר מתקדם (לקוחות)</h3>
+            <h3 style={{ margin: 0, marginBottom: 10 }}>פילטר מתקדם (הזדמנויות)</h3>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 800, color: "#6b7280" }}>לוגיקה בין התנאים</span>
               <select
@@ -2688,9 +2691,9 @@ export default function PipelineClient() {
               </button>
             </div>
             <div style={{ display: "inline-flex", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
-              {(["details", "notes", "tasks", "jotform", "whatsapp", "greenapi"] as const).map((t) => (
+              {(["details", "notes", "tasks", "whatsapp", "greenapi"] as const).map((t) => (
                 <button key={t} type="button" onClick={() => setOppDetailTab(t)} style={{ border: "none", background: oppDetailTab === t ? "#ede9fe" : "#fff", padding: "8px 10px", cursor: "pointer", fontWeight: 800 }}>
-                  {t === "details" ? "פרטים" : t === "notes" ? "פתקים" : t === "tasks" ? "משימות" : t === "jotform" ? "שאלון Jotform" : t === "whatsapp" ? "WhatsApp" : "GreenAPI"}
+                  {t === "details" ? "פרטים" : t === "notes" ? "פתקים" : t === "tasks" ? "משימות" : t === "whatsapp" ? "WhatsApp" : "GreenAPI"}
                 </button>
               ))}
             </div>
@@ -2740,7 +2743,7 @@ export default function PipelineClient() {
                       onClick={() => {
                         const id = selectedOpp.contactId;
                         if (!id) return;
-                        window.location.href = `/contacts/${encodeURIComponent(id)}`;
+                        window.location.href = `/contacts?openContactId=${encodeURIComponent(id)}`;
                       }}
                       style={{ gridColumn: "1 / -1", padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer", fontWeight: 800 }}
                     >
@@ -2773,7 +2776,7 @@ export default function PipelineClient() {
                   </div>
                   <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
                 <label style={{ display: "grid", gap: 4, gridColumn: "1 / -1" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>שם לקוח</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>שם הזדמנות</span>
                   <input value={selectedOpp.name} onChange={(e) => setSelectedOpp((x) => (x ? { ...x, name: e.target.value } : x))} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }} />
                 </label>
                 <label style={{ display: "grid", gap: 4 }}>
@@ -2987,7 +2990,7 @@ export default function PipelineClient() {
                     cursor: "pointer",
                   }}
                 >
-                  מחק לקוח
+                  מחק הזדמנות
                 </button>
                   </div>
                 </div>
@@ -2995,7 +2998,33 @@ export default function PipelineClient() {
             )}
             {oppDetailTab === "notes" && (
               <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                {oppNotes.map((n) => (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {([
+                    { id: "all", label: "כל ההערות" },
+                    { id: "orders", label: "הזמנות / זיכוי" },
+                    { id: "tasks", label: "הערות משימות" },
+                    { id: "calls", label: "ניהול שיחות" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setOppNotesFilter(opt.id)}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        border: "1px solid #e5e7eb",
+                        background: oppNotesFilter === opt.id ? "#ede9fe" : "#fff",
+                        color: oppNotesFilter === opt.id ? "#5b21b6" : "#374151",
+                        fontWeight: 700,
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {oppNotes.filter((n) => notePassesFilter(n, oppNotesFilter)).map((n) => (
                   <div key={n.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 10, background: "#fff" }}>
                     <div
                       style={{
@@ -3033,6 +3062,9 @@ export default function PipelineClient() {
                     ) : null}
                   </div>
                 ))}
+                {oppNotes.filter((n) => notePassesFilter(n, oppNotesFilter)).length === 0 ? (
+                  <div style={{ color: "#6b7280", fontSize: 13 }}>אין הערות להצגה לפי הסינון שנבחר.</div>
+                ) : null}
                 <input
                   type="file"
                   multiple
@@ -3174,42 +3206,6 @@ export default function PipelineClient() {
                 </button>
               </div>
             )}
-            {oppDetailTab === "jotform" && (
-              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                {oppJotformSubmissions.length === 0 ? (
-                  <div style={{ color: "#9ca3af", fontWeight: 600, fontSize: 13 }}>אין שאלוני Jotform ללקוח זה</div>
-                ) : (
-                  oppJotformSubmissions.map((sub) => (
-                    <article key={sub.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fafafa", display: "grid", gap: 8 }}>
-                      <div style={{ fontSize: 12, color: "#6b7280", display: "flex", flexWrap: "wrap", gap: 10 }}>
-                        <span>טופס: {sub.formId || "—"}</span>
-                        <span>הגשה: {formatIsraelDateTime(sub.submittedAt)}</span>
-                      </div>
-                      {sub.answers.map((ans) => (
-                        <div key={`${sub.id}-${ans.questionId}`} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: "8px 10px", background: "#fff" }}>
-                          <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4 }}>{ans.label || ans.questionId}</div>
-                          {ans.value?.trim() ? <div style={{ whiteSpace: "pre-wrap" }}>{ans.value}</div> : null}
-                          {ans.fileUrls?.length ? (
-                            <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                              {ans.fileUrls.map((u) => (
-                                <a key={u} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
-                                  📎 קובץ
-                                </a>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                      {sub.driveFolderUrl?.trim() ? (
-                        <a href={sub.driveFolderUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, fontWeight: 800, color: "#4c1d95" }}>
-                          פתח תיקיית Drive
-                        </a>
-                      ) : null}
-                    </article>
-                  ))
-                )}
-              </div>
-            )}
             {oppDetailTab === "whatsapp" && (
               <div style={{ marginTop: 12 }}>
                 <WhatsAppChatPanel phone={selectedOpp.contactPhone ?? ""} />
@@ -3258,6 +3254,23 @@ export default function PipelineClient() {
                 placeholder="כותרת"
                 style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid #e5e7eb" }}
               />
+              {oppTaskModal.mode === "new" ? (
+                <>
+                  <label style={{ fontWeight: 700, fontSize: 12 }}>הערה לפתקים (אופציונלי)</label>
+                  <textarea
+                    value={oppTaskNote}
+                    onChange={(e) => setOppTaskNote(e.target.value)}
+                    placeholder="הערה שתתווסף לפתקים של ההזדמנות/איש קשר מקושר..."
+                    style={{
+                      minHeight: 90,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      border: "1px solid #e5e7eb",
+                      lineHeight: 1.5,
+                    }}
+                  />
+                </>
+              ) : null}
               <label style={{ fontWeight: 700, fontSize: 12 }}>דדליין (אופציונלי)</label>
               <input
                 type="datetime-local"
@@ -3348,6 +3361,7 @@ export default function PipelineClient() {
                     const remIso = oppTfRem.trim() ? fromLocalInputOppTask(oppTfRem) : "";
                     const title = oppTfTitle.trim();
                     if (!title) return;
+                    const taskNoteText = oppTaskNote.trim();
                     const id = selectedOpp.id;
                     const syncOk =
                       oppGcalConnected && oppSyncGcal && Boolean(dueIso.trim());
@@ -3369,8 +3383,22 @@ export default function PipelineClient() {
                           ...gcalFields,
                         },
                       ];
+                      const noteToAppend = taskNoteText
+                        ? {
+                            id: crypto.randomUUID(),
+                            text: `משימה חדשה: ${title}\n${taskNoteText}`,
+                            createdAt: new Date().toISOString(),
+                            createdBy: "משימות",
+                          }
+                        : null;
+                      const notes = noteToAppend ? [...oppNotes, noteToAppend] : oppNotes;
                       setOppTasks(tasks);
-                      void saveOpportunityPatch(id, { tasks }, { fromDetail: true });
+                      if (noteToAppend) setOppNotes(notes);
+                      void saveOpportunityPatch(
+                        id,
+                        noteToAppend ? { tasks, notes } : { tasks },
+                        { fromDetail: true }
+                      );
                     } else {
                       const tid = oppTaskModal.task.id;
                       const tasks = oppTasks.map((x) =>
@@ -3451,9 +3479,9 @@ export default function PipelineClient() {
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>מחיקה מרובה של לקוחות</div>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>מחיקה מרובה של הזדמנויות</div>
             <p style={{ margin: "0 0 12px", color: "#4b5563", lineHeight: 1.55, fontSize: 14 }}>
-              פעולה זו תמחק לצמיתות <strong>{selectedOppIds.length}</strong> לקוחות. אי אפשר לבטל.
+              פעולה זו תמחק לצמיתות <strong>{selectedOppIds.length}</strong> הזדמנויות. אי אפשר לבטל.
             </p>
             <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 700 }}>
               כדי לאשר, הקלידו במדויק: <code dir="ltr">DELETE</code>
@@ -3543,9 +3571,9 @@ export default function PipelineClient() {
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>מחיקת לקוח</div>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>מחיקת הזדמנות</div>
             <p style={{ margin: "0 0 12px", color: "#4b5563", lineHeight: 1.55, fontSize: 14 }}>
-              פעולה זו תמחק לצמיתות את הלקוח <strong dir="ltr">{selectedOpp.name}</strong>. אי אפשר לבטל.
+              פעולה זו תמחק לצמיתות את ההזדמנות <strong dir="ltr">{selectedOpp.name}</strong>. אי אפשר לבטל.
             </p>
             <p style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 700 }}>
               כדי לאשר, הקלידו במדויק: <code dir="ltr">DELETE</code>
@@ -3594,13 +3622,13 @@ export default function PipelineClient() {
                   });
                   const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
                   if (!res.ok || !j.ok) {
-                    setErr(j.error ?? "מחיקת לקוח נכשלה");
+                    setErr(j.error ?? "מחיקת הזדמנות נכשלה");
                     return;
                   }
                   setOppDeleteOpen(false);
                   setOppDeleteConfirm("");
                   setSelectedOpp(null);
-                  setToastMessage("הלקוח נמחק");
+                  setToastMessage("ההזדמנות נמחקה");
                   await mutatePipeline();
                 })()}
                 style={{

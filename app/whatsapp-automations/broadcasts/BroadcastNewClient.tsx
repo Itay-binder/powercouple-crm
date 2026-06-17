@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AudienceCondition, AudienceLogic } from "@/lib/whatsapp/audienceFilter";
@@ -121,6 +121,8 @@ export default function BroadcastNewClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
+  const sendInFlightRef = useRef(false);
+  const sendIdempotencyKeyRef = useRef("");
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
@@ -409,10 +411,18 @@ export default function BroadcastNewClient() {
   }
 
   async function sendBroadcast() {
+    if (sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     setSending(true);
     setErr(null);
     setOkMsg(null);
     try {
+      if (!sendIdempotencyKeyRef.current) {
+        sendIdempotencyKeyRef.current =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `wa-send-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      }
       const parameterValues = manualParameterValues;
       if (selectedIds.size === 0) {
         throw new Error("בחרו לפחות איש קשר אחד מהרשימה.");
@@ -429,6 +439,7 @@ export default function BroadcastNewClient() {
         conditions,
         logic,
         recipientIds: selectedArr,
+        idempotencyKey: sendIdempotencyKeyRef.current,
         ...(oneTimeMarketingOverrideIds.length > 0
           ? { oneTimeMarketingOverrideIds }
           : {}),
@@ -450,6 +461,7 @@ export default function BroadcastNewClient() {
       setErr(e instanceof Error ? e.message : "שליחה נכשלה");
     } finally {
       setSending(false);
+      sendInFlightRef.current = false;
     }
   }
 
