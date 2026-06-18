@@ -5,6 +5,8 @@ export const revalidate = 0;
 
 export async function GET() {
   const out: Record<string, unknown> = {};
+  out.vercelEnv = process.env.VERCEL_ENV || null;
+  out.adminEmailsValue = (process.env.ADMIN_EMAILS || "").slice(0, 70);
   out.env = {
     SUPABASE_DB_URL: (process.env.SUPABASE_DB_URL || "").length,
     SUPABASE_SERVICE_ROLE_KEY: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").length,
