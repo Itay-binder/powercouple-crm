@@ -1,16 +1,13 @@
 import { cookies } from "next/headers";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/publicConfig";
 
 function url(): string {
-  const v = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  if (!v) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
-  return v;
+  return SUPABASE_URL;
 }
 function anonKey(): string {
-  const v = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!v) throw new Error("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  return v;
+  return SUPABASE_ANON_KEY;
 }
 
 /**

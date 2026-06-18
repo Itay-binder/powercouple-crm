@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/publicConfig";
 
 /**
  * Verify the request's authenticated user via:
@@ -9,11 +10,7 @@ import { createServerClient } from "@supabase/ssr";
 export async function getVerifiedAuthFromRequest(
   req: NextRequest
 ): Promise<{ uid: string; email?: string } | null> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) return null;
-
-  const supabase = createServerClient(url, anon, {
+  const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     cookies: {
       getAll() {
         return req.cookies.getAll();
